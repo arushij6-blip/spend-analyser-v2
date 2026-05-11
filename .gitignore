@@ -1,0 +1,19 @@
+node_modules/
+.env
+.env.local
+tokens.json
+*.log
+.DS_Store
+.next/
+.git.old-backup/
+
+# Local config (personal data)
+config.local.js
+
+# Database + exports (contain real transaction data)
+data/app.db
+data/app.db-shm
+data/app.db-wal
+data/app.db.backup-*
+data/transactions.json
+data/transactions.csv

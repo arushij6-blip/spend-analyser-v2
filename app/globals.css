@@ -1,0 +1,83 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  /* Surfaces — soft blue-tinted off-white */
+  --bg: #f7f9fc;
+  --surface: #ffffff;
+  --surface-2: #f1f5fb;
+
+  /* Hairlines */
+  --hairline: #e6ecf3;
+  --hairline-strong: #d6dee9;
+
+  /* Ink (text) — cool slate */
+  --ink-900: #0b1f3a;
+  --ink-700: #324768;
+  --ink-500: #5b6b85;
+  --ink-400: #8a96aa;
+  --ink-300: #b9c2d2;
+
+  /* Accents — restrained editorial blue */
+  --accent: #2563eb;        /* primary action */
+  --accent-700: #1d4ed8;    /* hover */
+  --accent-50: #eff5ff;     /* soft tint */
+  --accent-100: #dbeafe;
+  --positive: #057a55;
+  --warning: #b45309;
+}
+
+html, body { height: 100%; background: var(--bg); }
+
+body {
+  font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: var(--ink-900);
+  font-feature-settings: 'cv11', 'ss01';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.005em;
+}
+
+/* Numeric polish */
+.num { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum', 'cv11'; }
+.mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-feature-settings: 'tnum'; }
+
+/* Headings tighter */
+.display { letter-spacing: -0.028em; }
+.tighter { letter-spacing: -0.02em; }
+
+/* Hairline borders helper */
+.border-hair { border-color: var(--hairline); }
+
+/* Scrollbar */
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: #e5e5e3; border-radius: 5px; border: 2px solid var(--bg); }
+*::-webkit-scrollbar-thumb:hover { background: #d4d4d2; }
+
+/* Motion */
+@keyframes fadeIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+.fade-in { animation: fadeIn 240ms cubic-bezier(.16,1,.3,1); }
+
+@keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+.skeleton {
+  background: linear-gradient(90deg, #eef2f8 0%, #f5f8fc 50%, #eef2f8 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+/* Soft elevation */
+.elev-1 { box-shadow: 0 1px 0 rgba(15,40,80,0.02), 0 1px 3px rgba(15,40,80,0.04); }
+.elev-2 { box-shadow: 0 1px 0 rgba(15,40,80,0.03), 0 8px 28px -10px rgba(15,40,80,0.12); }
+
+/* Focus ring */
+.focus-ring:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37,99,235,0.18);
+  border-color: var(--accent) !important;
+}
+
+/* Selection */
+::selection { background: rgba(37,99,235,0.14); color: var(--ink-900); }

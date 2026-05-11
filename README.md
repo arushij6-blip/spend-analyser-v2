@@ -1,0 +1,56 @@
+# Spend Analyser
+
+A personal expense dashboard that reads Axis Bank transaction-alert emails from
+Gmail, parses + categorizes them, and surfaces them in a Next.js UI backed by
+SQLite.
+
+## Stack
+- Next.js 15 (App Router) + React 18 + Tailwind CSS
+- `better-sqlite3` for persistence (`data/app.db`)
+- Gmail API (`googleapis`) with OAuth 2.0 (loopback redirect)
+
+## One-time setup
+
+1. **Install deps**
+   ```bash
+   npm install
+   ```
+
+2. **Create local config**
+   ```bash
+   cp config.example.js config.local.js
+   # edit config.local.js — fill in EMAIL_SOURCE_MAP, SELF_OWNED_ACCOUNTS,
+   # STAFF_SALARY_PATTERNS for your situation
+   ```
+
+3. **Gmail OAuth credentials** — create a Google Cloud project, enable the
+   Gmail API, configure an OAuth consent screen, and create a Desktop-app
+   OAuth client. Place the resulting client id/secret in `~/.claude/.env.gmail`:
+   ```
+   GMAIL_CLIENT_ID=...
+   GMAIL_CLIENT_SECRET=...
+   ```
+
+4. **Authenticate each Gmail account**
+   ```bash
+   node src/auth.js you@gmail.com
+   ```
+   Tokens are stored under `~/.gmail-mcp/tokens.json`.
+
+## Running
+
+```bash
+npm run dev          # Next.js on http://localhost:3000
+node src/fetch-all.js 2025-05-01   # standalone CLI scan → data/transactions.{json,csv}
+```
+
+The web UI exposes:
+- **Dashboard** — month-by-month KPIs, category breakdown, top transactions
+- **Expenses** — full transaction list with category editing
+- **Review** — uncategorized (Misc) items needing manual assignment
+
+## What's gitignored
+
+- `config.local.js` (personal mappings)
+- `data/app.db*`, `data/transactions.{json,csv}`, backups
+- `.env`, `tokens.json`, `node_modules/`, `.next/`
