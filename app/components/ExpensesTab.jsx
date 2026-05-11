@@ -7,6 +7,7 @@ export default function ExpensesTab({ transactions, onUpdateCategory, categories
   const [sort, setSort] = useState({ key: 'date', dir: 'desc' });
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState(null);
+  const [typeFilter, setTypeFilter] = useState('ALL');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   const [sourceFilter, setSourceFilter] = useState('ALL');
 
@@ -18,6 +19,7 @@ export default function ExpensesTab({ transactions, onUpdateCategory, categories
 
   const visible = useMemo(() => {
     let rows = transactions;
+    if (typeFilter !== 'ALL') rows = rows.filter((t) => t.type === typeFilter);
     if (categoryFilter !== 'ALL') rows = rows.filter((t) => t.category === categoryFilter);
     if (sourceFilter !== 'ALL') rows = rows.filter((t) => t.source === sourceFilter);
     if (search.trim()) {
@@ -46,7 +48,7 @@ export default function ExpensesTab({ transactions, onUpdateCategory, categories
         : String(bv).localeCompare(String(av));
     });
     return sorted;
-  }, [transactions, sort, search, categoryFilter, sourceFilter]);
+  }, [transactions, sort, search, typeFilter, categoryFilter, sourceFilter]);
 
   const monthGroups = useMemo(() => {
     const groups = new Map();
@@ -79,9 +81,9 @@ export default function ExpensesTab({ transactions, onUpdateCategory, categories
     return `${monthNames[Number(m) - 1]} ${y}`;
   }
 
-  const hasFilters = categoryFilter !== 'ALL' || sourceFilter !== 'ALL' || search.trim().length > 0;
+  const hasFilters = typeFilter !== 'ALL' || categoryFilter !== 'ALL' || sourceFilter !== 'ALL' || search.trim().length > 0;
   function clearFilters() {
-    setSearch(''); setCategoryFilter('ALL'); setSourceFilter('ALL');
+    setSearch(''); setTypeFilter('ALL'); setCategoryFilter('ALL'); setSourceFilter('ALL');
   }
 
   return (
@@ -99,6 +101,11 @@ export default function ExpensesTab({ transactions, onUpdateCategory, categories
             style={{ borderColor: 'var(--hairline)' }}
           />
         </div>
+        <FilterSelect value={typeFilter} onChange={setTypeFilter} options={[
+          { v: 'ALL', l: 'All types' },
+          { v: 'DEBIT', l: 'Debits' },
+          { v: 'CREDIT', l: 'Credits' },
+        ]} />
         <FilterSelect value={categoryFilter} onChange={setCategoryFilter} options={[
           { v: 'ALL', l: 'All categories' },
           ...categories.map((c) => ({ v: c, l: c })),
@@ -133,7 +140,9 @@ export default function ExpensesTab({ transactions, onUpdateCategory, categories
         </div>
       ) : (
         monthGroups.map(([month, monthTxns]) => {
-          const monthDebit = monthTxns.reduce((s, t) => s + t.amount, 0);
+          const monthDebit = monthTxns
+            .filter((t) => t.type === 'DEBIT')
+            .reduce((s, t) => s + t.amount, 0);
 
           return (
             <section key={month} className="bg-white border rounded-2xl overflow-hidden elev-1" style={{ borderColor: 'var(--hairline)' }}>
@@ -216,8 +225,11 @@ export default function ExpensesTab({ transactions, onUpdateCategory, categories
                           {t.account && <div className="mono text-[10.5px] text-neutral-400 mt-0.5">{t.account}</div>}
                         </td>
                         <td className="px-6 py-3.5 text-right whitespace-nowrap num align-top">
-                          <span className="font-semibold tighter text-neutral-900">
-                            {fmtAmount(t.amount)}
+                          <span
+                            className={`font-semibold tighter ${t.type === 'CREDIT' ? '' : 'text-neutral-900'}`}
+                            style={t.type === 'CREDIT' ? { color: 'var(--positive)' } : {}}
+                          >
+                            {t.type === 'CREDIT' ? '+' : ''}{fmtAmount(t.amount)}
                           </span>
                         </td>
                       </tr>

@@ -26,9 +26,7 @@ export default function Home() {
     try {
       const res = await fetch('/api/transactions', { cache: 'no-store' });
       const data = await res.json();
-      // Credits are not expenses — drop them globally before they reach any tab.
-      const debitsOnly = (data.transactions ?? []).filter((t) => t.type === 'DEBIT');
-      setTransactions(debitsOnly);
+      setTransactions(data.transactions ?? []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -80,13 +78,21 @@ export default function Home() {
     );
   }
 
+  // Debit-only view: used by hero, dashboard, and review badge — anywhere
+  // a summary or "header" number is shown. The Expenses tab gets the full
+  // list (credits included) since the table itself shows them inline.
+  const debitTransactions = useMemo(
+    () => transactions.filter((t) => t.type === 'DEBIT'),
+    [transactions]
+  );
+
   const stats = useMemo(() => {
-    // Hero summary is May-only. Transactions are already debit-only.
-    const debits = transactions.filter((t) => t.date?.startsWith('2026-05'));
+    // Hero summary is May-only, debits only.
+    const debits = debitTransactions.filter((t) => t.date?.startsWith('2026-05'));
     const totalDebit = debits.reduce((s, t) => s + t.amount, 0);
 
-    // Review badge stays global (all Misc across loaded range).
-    const uncat = transactions.filter((t) => t.category === 'Misc' && !t.manually_edited).length;
+    // Review badge stays global (all Misc debits across loaded range).
+    const uncat = debitTransactions.filter((t) => t.category === 'Misc' && !t.manually_edited).length;
 
     const byCat = new Map();
     for (const t of debits) {
@@ -101,7 +107,7 @@ export default function Home() {
       avg: debits.length ? totalDebit / debits.length : 0,
       topCategory: top ? { name: top[0], amount: top[1] } : null,
     };
-  }, [transactions]);
+  }, [debitTransactions]);
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: 'var(--bg)' }}>
@@ -118,7 +124,7 @@ export default function Home() {
             ) : (
               <div className="fade-in">
                 {active === 'dashboard' && (
-                  <DashboardTab transactions={transactions} />
+                  <DashboardTab transactions={debitTransactions} />
                 )}
                 {active === 'expenses' && (
                   <ExpensesTab
@@ -129,7 +135,7 @@ export default function Home() {
                 )}
                 {active === 'review' && (
                   <ReviewTab
-                    transactions={transactions.filter((t) => t.category === 'Misc' && !t.manually_edited)}
+                    transactions={debitTransactions.filter((t) => t.category === 'Misc' && !t.manually_edited)}
                     onUpdateCategory={(id, cat) => updateCategory(id, cat, { learn: true })}
                     categories={CATEGORIES}
                   />
@@ -212,35 +218,37 @@ function Hero({ stats, loading }) {
     <section className="pt-14 pb-10 relative">
       <HeroIllustration />
 
-      <div className="text-[11px] uppercase tracking-[0.14em] font-medium" style={{ color: 'var(--ink-500)' }}>
-        Spending overview · May 2026
-      </div>
-
-      <div className="mt-3 flex items-end gap-6 flex-wrap">
-        <div>
-          <div className="num display text-[64px] leading-none font-medium" style={{ color: 'var(--ink-900)' }}>
-            {loading ? <span className="skeleton inline-block h-14 w-64 rounded-md align-middle" /> : fmtAmount(totalDebit)}
-          </div>
-          <div className="mt-3 text-[13px]" style={{ color: 'var(--ink-500)' }}>
-            {loading ? '—' : (
-              <span>
-                across <span className="font-medium num" style={{ color: 'var(--ink-900)' }}>{txnCount}</span> transactions
-              </span>
-            )}
-          </div>
+      <div className="md:pr-[200px]">
+        <div className="text-[11px] uppercase tracking-[0.14em] font-medium" style={{ color: 'var(--ink-500)' }}>
+          Spending overview · May 2026
         </div>
 
-        {!loading && (
-          <div className="ml-auto flex items-stretch gap-8 pb-1">
-            <MiniStat label="Avg ticket" value={fmtAmount(avg)} />
-            {topCategory && (
-              <>
-                <Sep />
-                <MiniStat label="Top category" value={topCategory.name} sub={fmtAmount(topCategory.amount)} />
-              </>
-            )}
+        <div className="mt-3 flex items-end gap-6 flex-wrap">
+          <div>
+            <div className="num display text-[64px] leading-none font-medium" style={{ color: 'var(--ink-900)' }}>
+              {loading ? <span className="skeleton inline-block h-14 w-64 rounded-md align-middle" /> : fmtAmount(totalDebit)}
+            </div>
+            <div className="mt-3 text-[13px]" style={{ color: 'var(--ink-500)' }}>
+              {loading ? '—' : (
+                <span>
+                  across <span className="font-medium num" style={{ color: 'var(--ink-900)' }}>{txnCount}</span> transactions
+                </span>
+              )}
+            </div>
           </div>
-        )}
+
+          {!loading && (
+            <div className="ml-auto flex items-stretch gap-8 pb-1">
+              <MiniStat label="Avg ticket" value={fmtAmount(avg)} />
+              {topCategory && (
+                <>
+                  <Sep />
+                  <MiniStat label="Top category" value={topCategory.name} sub={fmtAmount(topCategory.amount)} />
+                </>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </section>
   );
