@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import DashboardTab from './components/DashboardTab.jsx';
 import ExpensesTab from './components/ExpensesTab.jsx';
 import ReviewTab from './components/ReviewTab.jsx';
@@ -19,7 +19,10 @@ export default function Home() {
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [scanState, setScanState] = useState({ running: false, lastResult: null, error: null });
+  const [uploadState, setUploadState] = useState({ running: false, lastResult: null, error: null });
   const [toastVisible, setToastVisible] = useState(false);
+  const [toastSource, setToastSource] = useState('sync');
+  const fileInputRef = useRef(null);
 
   async function loadTransactions() {
     setLoading(true);
@@ -38,11 +41,21 @@ export default function Home() {
 
   useEffect(() => {
     if (scanState.lastResult || scanState.error) {
+      setToastSource('sync');
       setToastVisible(true);
       const t = setTimeout(() => setToastVisible(false), 4000);
       return () => clearTimeout(t);
     }
   }, [scanState.lastResult, scanState.error]);
+
+  useEffect(() => {
+    if (uploadState.lastResult || uploadState.error) {
+      setToastSource('upload');
+      setToastVisible(true);
+      const t = setTimeout(() => setToastVisible(false), 4000);
+      return () => clearTimeout(t);
+    }
+  }, [uploadState.lastResult, uploadState.error]);
 
   async function runScan() {
     setScanState({ running: true, lastResult: null, error: null });
@@ -58,6 +71,28 @@ export default function Home() {
       await loadTransactions();
     } catch (err) {
       setScanState({ running: false, lastResult: null, error: err.message });
+    }
+  }
+
+  function openUploadPicker() {
+    fileInputRef.current?.click();
+  }
+
+  async function handleFileSelected(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setUploadState({ running: true, lastResult: null, error: null });
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('/api/upload-pdf', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Upload failed');
+      setUploadState({ running: false, lastResult: data, error: null });
+      await loadTransactions();
+    } catch (err) {
+      setUploadState({ running: false, lastResult: null, error: err.message });
     }
   }
 
@@ -111,7 +146,19 @@ export default function Home() {
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: 'var(--bg)' }}>
-      <TopBar onSync={runScan} syncing={scanState.running} />
+      <TopBar
+        onSync={runScan}
+        syncing={scanState.running}
+        onUpload={openUploadPicker}
+        uploading={uploadState.running}
+      />
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="application/pdf,.pdf"
+        onChange={handleFileSelected}
+        className="hidden"
+      />
 
       <main className="flex-1">
         <div className="max-w-[1180px] mx-auto px-8">
@@ -147,12 +194,16 @@ export default function Home() {
         </div>
       </main>
 
-      <Toast visible={toastVisible} state={scanState} />
+      <Toast
+        visible={toastVisible}
+        state={toastSource === 'upload' ? uploadState : scanState}
+        kind={toastSource}
+      />
     </div>
   );
 }
 
-function TopBar({ onSync, syncing }) {
+function TopBar({ onSync, syncing, onUpload, uploading }) {
   return (
     <header
       className="sticky top-0 z-30 border-b backdrop-blur-md"
@@ -170,29 +221,55 @@ function TopBar({ onSync, syncing }) {
             </div>
           </div>
         </div>
-        <button
-          onClick={onSync}
-          disabled={syncing}
-          className="focus-ring inline-flex items-center gap-2 h-8 px-3.5 rounded-full text-[12.5px] font-medium text-white transition shadow-sm disabled:cursor-not-allowed"
-          style={{
-            background: syncing ? 'var(--ink-300)' : 'var(--accent)',
-            borderColor: syncing ? 'var(--ink-300)' : 'var(--accent)',
-          }}
-          onMouseEnter={(e) => { if (!syncing) e.currentTarget.style.background = 'var(--accent-700)'; }}
-          onMouseLeave={(e) => { if (!syncing) e.currentTarget.style.background = 'var(--accent)'; }}
-        >
-          {syncing ? (
-            <>
-              <Spinner />
-              <span>Syncing</span>
-            </>
-          ) : (
-            <>
-              <SyncIcon />
-              <span>Sync</span>
-            </>
-          )}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onUpload}
+            disabled={uploading}
+            className="focus-ring inline-flex items-center gap-2 h-8 px-3.5 rounded-full text-[12.5px] font-medium transition shadow-sm disabled:cursor-not-allowed border"
+            style={{
+              background: 'white',
+              color: uploading ? 'var(--ink-400)' : 'var(--ink-900)',
+              borderColor: 'var(--hairline)',
+            }}
+            onMouseEnter={(e) => { if (!uploading) e.currentTarget.style.background = 'var(--ink-50, #f3f4f6)'; }}
+            onMouseLeave={(e) => { if (!uploading) e.currentTarget.style.background = 'white'; }}
+          >
+            {uploading ? (
+              <>
+                <Spinner />
+                <span>Uploading</span>
+              </>
+            ) : (
+              <>
+                <UploadIcon />
+                <span>Upload</span>
+              </>
+            )}
+          </button>
+          <button
+            onClick={onSync}
+            disabled={syncing}
+            className="focus-ring inline-flex items-center gap-2 h-8 px-3.5 rounded-full text-[12.5px] font-medium text-white transition shadow-sm disabled:cursor-not-allowed"
+            style={{
+              background: syncing ? 'var(--ink-300)' : 'var(--accent)',
+              borderColor: syncing ? 'var(--ink-300)' : 'var(--accent)',
+            }}
+            onMouseEnter={(e) => { if (!syncing) e.currentTarget.style.background = 'var(--accent-700)'; }}
+            onMouseLeave={(e) => { if (!syncing) e.currentTarget.style.background = 'var(--accent)'; }}
+          >
+            {syncing ? (
+              <>
+                <Spinner />
+                <span>Syncing</span>
+              </>
+            ) : (
+              <>
+                <SyncIcon />
+                <span>Sync</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
     </header>
   );
@@ -386,9 +463,20 @@ function SyncIcon() {
   );
 }
 
-function Toast({ visible, state }) {
+function UploadIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="17 8 12 3 7 8" />
+      <line x1="12" y1="3" x2="12" y2="15" />
+    </svg>
+  );
+}
+
+function Toast({ visible, state, kind = 'sync' }) {
   if (!visible) return null;
   const isErr = !!state.error;
+  const verb = kind === 'upload' ? 'Imported' : 'Synced';
   return (
     <div className="fixed bottom-6 right-6 z-50 fade-in">
       <div
@@ -402,7 +490,7 @@ function Toast({ visible, state }) {
         <span className="text-[12.5px] text-neutral-800">
           {isErr ? state.error : (
             <>
-              Synced · <span className="text-neutral-500 num">+{state.lastResult?.inserted} new, {state.lastResult?.updated} updated</span>
+              {verb} · <span className="text-neutral-500 num">+{state.lastResult?.inserted} new, {state.lastResult?.updated} updated</span>
             </>
           )}
         </span>
