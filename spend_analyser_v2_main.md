@@ -5,7 +5,8 @@ A personal spend analyser that ingests transactions from multiple sources, categ
 
 Currently supported ingest sources:
 1. **Gmail** — Axis Bank transaction-alert emails, fetched via the Gmail API
-2. **PDF upload** — HDFC Diners Black credit-card statement PDFs, parsed server-side
+2. **PDF upload (HDFC)** — HDFC Diners Black credit-card statement PDFs, parsed server-side
+3. **PDF upload (ICICI)** — ICICI Bank savings account statement PDFs, parsed server-side
 
 (Started life as `axis-email-reader`; renamed to `spend-analyser-v2` once the
 PDF upload path landed and the scope went beyond Axis emails. The on-disk
@@ -22,34 +23,38 @@ format and many small CC charges don't trigger alerts at all). The PDF upload
 path covers that gap: drop in the monthly statement and the dashboard reflects
 both Axis savings and HDFC credit-card spend under one set of categories.
 
+ICICI savings-account spend was added next so the same dashboard can show
+all spend irrespective of which bank an expense was routed through.
+
 ## Architecture
 
 ```
 spend-analyser-v2/ (dir still named axis-email-reader)
-├── package.json                # name: spend-analyser-v2
-├── .gitignore                  # Excludes node_modules, .env, tokens.json, data/app.db*
-├── spend_analyser_v2_main.md   # This file - project knowledge
+├── package.json                       # name: spend-analyser-v2
+├── .gitignore                         # Excludes node_modules, .env, tokens.json, data/app.db*
+├── spend_analyser_v2_main.md          # This file - project knowledge
 ├── src/
-│   ├── auth.js                 # OAuth 2.0 flow for Gmail (one-time, browser-based)
-│   ├── gmail-client.js         # Gmail API wrapper for fetching messages
-│   ├── transaction-parser.js   # Parses Axis email HTML → transaction fields
-│   ├── pdf-statement-parser.js # Parses HDFC Diners CC PDFs → transaction fields
-│   ├── categorizer.js          # Shared rules pipeline (keywords + learned rules)
-│   ├── fetch-all.js            # CLI: scan all authenticated Gmail accounts
-│   └── validate-one.js         # CLI: fetch ONE email, sanity-check parser output
+│   ├── auth.js                        # OAuth 2.0 flow for Gmail (one-time, browser-based)
+│   ├── gmail-client.js                # Gmail API wrapper for fetching messages
+│   ├── transaction-parser.js          # Parses Axis email HTML → transaction fields
+│   ├── pdf-statement-parser.js        # Parses HDFC Diners CC PDFs → transaction fields
+│   ├── icici-pdf-statement-parser.js  # Parses ICICI savings account PDFs → transaction fields
+│   ├── categorizer.js                 # Shared rules pipeline (refund / keywords / learned rules)
+│   ├── fetch-all.js                   # CLI: scan all authenticated Gmail accounts
+│   └── validate-one.js                # CLI: fetch ONE email, sanity-check parser output
 ├── app/
-│   ├── page.jsx                # Dashboard shell (TopBar with Sync + Upload, tabs)
-│   ├── components/             # Dashboard / Expenses / Review / Trends tabs
+│   ├── page.jsx                       # Dashboard shell (TopBar with Sync + Upload, tabs)
+│   ├── components/                    # Dashboard / Expenses / Review / Trends tabs
 │   └── api/
-│       ├── scan/route.js       # POST → run Gmail scan
-│       ├── upload-pdf/route.js # POST (multipart) → parse PDF, categorize, upsert
-│       ├── transactions/       # GET list / PATCH category
-│       └── trends/             # GET monthly category totals
+│       ├── scan/route.js              # POST → run Gmail scan
+│       ├── upload-pdf/route.js        # POST (multipart) → parse PDF, categorize, upsert
+│       ├── transactions/              # GET list / PATCH category
+│       └── trends/                    # GET monthly category totals
 ├── lib/
-│   ├── db.js                   # SQLite layer (better-sqlite3, single source of truth)
-│   └── scan.js                 # runScan() — used by /api/scan and future CLI
+│   ├── db.js                          # SQLite layer (better-sqlite3, single source of truth)
+│   └── scan.js                        # runScan() — used by /api/scan and future CLI
 └── data/
-    └── app.db                  # SQLite store (gitignored)
+    └── app.db                         # SQLite store (gitignored)
 ```
 
 ## Tech Stack
@@ -101,32 +106,102 @@ Parser extracts:
 - **Merchant / Counterparty Name**
 - **Raw Transaction Info** (full string for audit)
 
-## PDF Statement Ingest (HDFC Diners Black)
+## PDF Statement Ingest
 
-Triggered from the dashboard's **Upload** button (next to Sync). The user picks
-a PDF, the file is POSTed multipart to `/api/upload-pdf`, and the route runs:
+The dashboard's **Upload** button (next to Sync) accepts both HDFC and ICICI
+statement PDFs. The file is POSTed multipart to `/api/upload-pdf`, which:
 
-1. `parseStatementPdf(buffer)` in `src/pdf-statement-parser.js`
-   - Extracts text via `pdf-parse` (no temp files; buffer in-memory)
-   - Locates the "Domestic Transactions" / "International Transactions" tables
-     by scanning for the `TRANSACTION DESCRIPTION` header
-   - Joins wrapped rows (e.g. IGST / BPPY entries that break across two PDF
-     lines) by accumulating until the trailing PI marker ` l` is seen
-   - Parses each row with a single regex; `+ ` before `C` ⇒ CREDIT,
-     otherwise DEBIT
-   - Card last-4 extracted from the masked card number in the page header
-     (`00360886XXXX0525` → `XX0525`)
-2. Each parsed row goes through the same `categorize()` used for Gmail rows
-   (so merchant keywords / learned rules / Daily Commute window all apply)
-3. `upsertTransactions()` writes them — `message_id` is `pdf:<fileTag>:<rowHash>`
-   so re-uploading the same PDF is idempotent and never produces duplicates
+1. Tries `parseStatementPdf` (HDFC Diners Black format) first.
+2. If zero rows are detected, falls back to `parseIciciStatementPdf`
+   (ICICI savings account format).
+3. Each parsed row goes through the same `categorize()` pipeline used for
+   Gmail rows, so keyword rules, learned rules, and refund detection apply
+   uniformly.
+4. `upsertTransactions()` writes them — `message_id` is `pdf:<fileTag>:<rowHash>`
+   so re-uploading the same PDF is idempotent and never produces duplicates.
 
-Currently the only supported PDF format is **HDFC Diners Black**. The header
-row signature (`DATE & TIME TRANSACTION DESCRIPTION REWARDS AMOUNT PI`) is the
-implicit format detector; other issuers will need their own parser.
+Passwords are not supported. Locked uploads return a clear error from the route.
 
-Passwords: not supported. Users must upload unlocked PDFs. (Locked uploads
-return a clear error from the route.)
+### HDFC Diners Black parser (`src/pdf-statement-parser.js`)
+Statement rows look like:
+```
+DD/MM/YYYY| HH:MM  DESCRIPTION  [± rewardPts]  [+] C amount  l
+```
+- `+` before `C` ⇒ CREDIT, otherwise DEBIT
+- Trailing ` l` marker closes a row (rows wrapping onto a second line are
+  joined until the marker is seen)
+- Card last-4 extracted from the masked card number in the page header
+  (`00360886XXXX0525` → `XX0525`)
+
+### ICICI savings parser (`src/icici-pdf-statement-parser.js`)
+ICICI's statement layout is column-based:
+```
+S No. | Transaction Date | Transaction Remarks | Withdrawal | Deposit | Balance
+```
+After PDF text extraction the Withdrawal and Deposit columns collapse to the
+same text position, so the parser can't tell which column the amount came
+from on its own. It runs in two passes:
+
+1. **Collection pass** — for each row, accumulate the wrapped merchant lines
+   and pull out `(amount, balance)` from the trailing amounts line.
+2. **Balance-diff pass** — walk the rows in order; compare each row's balance
+   to the previous balance. If the balance increased by ~`amount` → CREDIT;
+   if it decreased by ~`amount` → DEBIT. The first row falls back to DEBIT
+   (rare; later rows correct it via the diff once the chain is established).
+
+This balance-tracking approach matters because ICICI's text extraction
+provides no other reliable signal: there is no `+` marker, no separate
+column flag, and the same `1234.56 5678.90` pattern appears for both
+withdrawals and deposits.
+
+Account number is pulled from the statement header
+(`Saving Account no. <digits>`).
+
+## Refund Detection (CREDIT-based)
+
+The categorizer treats refunds as a first-class concept. Rather than matching
+keywords like `REFUND`/`RETURN`, refund detection runs on the transaction
+**type**:
+
+> **Any CREDIT transaction is a refund**, unless it matches a known
+> non-refund credit source (salary, investment settlement, FD maturity,
+> dividend, internal transfer).
+
+Non-refund CREDIT keywords (`NON_REFUND_CREDITS` in `categorizer.js`):
+- Salary / income: `SALARY`, `PAYROLL`
+- Investment settlements: `ZERODHA`, `ICCL`, `GROWW`, `UPSTOX`, `KUVERA`, `SMALLCASE`
+- Deposits / maturity: `FD`, `TERM DEPOSIT`, `FIXED DEPOSIT`, `TD FROM`, `FD FROM`, `INTEREST`
+- Other income: `DIVIDEND`, `BONUS`, `STOCK`, `MUTUAL FUND`
+- Transfers in: `TRANSFER IN`, `CREDIT TRANSFER`, `NEFT IN`
+
+When a transaction is flagged as a refund, the categorizer:
+- Sets `out.isRefund = true`
+- Routes it to `category = 'Shopping'`, `subCategory = 'Refund'`
+- Returns immediately (refund detection wins over all keyword rules)
+
+The DB stores this as `is_refund INTEGER` on the `transactions` table.
+Monthly category totals subtract refund amounts:
+```sql
+SUM(CASE WHEN is_refund = 1 THEN -amount ELSE amount END) AS total
+```
+So a category whose net spend is ₹49,083 = ₹89,228 in debits − ₹40,145 in
+refunds.
+
+The dashboard already paints CREDIT rows green with a leading `+`, so refund
+rows display correctly without any UI change.
+
+### Why CREDIT-based instead of keyword-based
+The first implementation looked for `REFUND`/`RETURN`/`CHARGEBACK`/`REVERSAL`
+substrings. That missed:
+- PhonePe cashbacks (`UPI/PhonePe/phonepemerchan/R02 PhoneP/...`)
+- Google Pay scratch-card credits (`UPI/Google Ind/gpayrefund-onl/...`
+  matched, but generic Google credits didn't)
+- P2P returns where someone sends money back without writing "refund"
+  anywhere in the description
+
+Switching to type-based detection caught all of these without needing an
+ever-growing keyword list. The non-refund allowlist is much smaller and
+more stable than the refund denylist would have been.
 
 ## Validation Approach
 Per principle #5:
@@ -135,6 +210,10 @@ Per principle #5:
 3. Prints the parsed result as a JSON object
 4. User confirms parsing is correct
 5. THEN scale to all emails from 2025-05-01
+
+For PDF uploads, validation happens by re-running parsing on a known
+statement and confirming the row count plus a sample of net category
+totals against the bank's own summary.
 
 ## Date Range Target
 - Start: configurable via CLI arg (default 2025-05-01)
@@ -152,6 +231,52 @@ can be axis.in, axis.com, alerts @axis. something"). The fix: include BOTH sende
 `buildQuery()`. Always cast a wide net for sender domains on bank/utility alerts where the
 sending infra is known to change over time.
 
+### Lesson learned (recorded for RCA #8)
+First ICICI parser pass classified every PDF row as DEBIT, including obvious
+credits like PhonePe cashbacks and Google refunds. Root cause: the parser
+assumed the leading amount on the amounts line was always a withdrawal,
+because that's what the HDFC parser does. ICICI's two-column layout makes
+that assumption wrong — the amount can be in either Withdrawal or Deposit,
+and after PDF extraction both look identical. Fix: track balance changes
+between consecutive rows and infer type from the sign of the diff. When the
+underlying text strips structural cues, derive the missing signal from
+something else in the document (here, the running balance).
+
+## Database Schema
+
+```sql
+CREATE TABLE transactions (
+  message_id            TEXT PRIMARY KEY,
+  date                  TEXT,
+  time                  TEXT,
+  type                  TEXT NOT NULL,        -- 'DEBIT' or 'CREDIT'
+  amount                REAL NOT NULL,
+  currency              TEXT DEFAULT 'INR',
+  account               TEXT,
+  merchant              TEXT,
+  category              TEXT NOT NULL,
+  auto_category         TEXT NOT NULL,
+  sub_category          TEXT,                 -- e.g. 'Refund', 'Term deposit'
+  transaction_id        TEXT,
+  bank_handle           TEXT,
+  raw_transaction_info  TEXT,
+  email_subject         TEXT,
+  email_received_at     TEXT,
+  source                TEXT NOT NULL,        -- 'Axis Bank' / 'HDFC Credit Card' / 'ICICI Bank' / ...
+  is_refund             INTEGER NOT NULL DEFAULT 0,
+  manually_edited       INTEGER NOT NULL DEFAULT 0,
+  created_at            TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at            TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+`is_refund` is set by the categorizer (`recat.isRefund ? 1 : 0`) and persists
+across re-categorization. It powers the net-spend math in
+`getMonthlyCategoryTotals()` and the green `+` display on the Expenses tab.
+
+For databases created before `is_refund` existed, the column is added via
+`ALTER TABLE transactions ADD COLUMN is_refund INTEGER NOT NULL DEFAULT 0`.
+
 ## Key Decisions
 | Decision | Rationale |
 |----------|-----------|
@@ -162,22 +287,45 @@ sending infra is known to change over time.
 | ESM modules (`type: module`) | Modern Node.js standard |
 | PDF parsing server-side in API route | Keeps the binary off the wire after one hop and reuses the same `categorize()` + DB code path as Gmail rows |
 | Synthetic `message_id` `pdf:<fileTag>:<rowHash>` for uploaded rows | Makes re-uploading a statement idempotent; collides on identical row text so accidental double-uploads merge instead of duplicating |
-| Hardcoded source label `HDFC Credit Card` for uploaded rows | Only one issuer supported today; will be replaced with header-text detection when a second issuer lands |
+| `/api/upload-pdf` tries HDFC parser, then ICICI on zero rows | No header-text detection needed; the parser that finds rows wins. Cheap to extend with a third parser. |
+| ICICI parser uses balance-diff to determine CREDIT vs DEBIT | ICICI's text extraction collapses Withdrawal and Deposit columns; the running balance is the only reliable signal left |
+| Refund detection by CREDIT type (not keyword match) | Keyword matching missed cashbacks and generic credits; the non-refund allowlist (salary/investments/transfers) is shorter and more stable than a refund denylist would be |
+| Refunds routed to `Shopping` with `sub_category = 'Refund'` | Most refunds in this dataset are e-commerce returns; one bucket is simpler than splitting refunds across original-spend categories, and the green `+` makes them visually obvious in Expenses |
+| Subtract refunds in `getMonthlyCategoryTotals()` via CASE expression | Keeps the math in SQL, so every consumer of the trends API sees the same net number |
+| Hardcoded source label `HDFC Credit Card` / `ICICI Bank` for uploaded rows | Will be replaced with header-text detection if a fourth/fifth issuer lands |
+| Drop `Credit Card Bill` rows at ingest (alongside `Self Transfer` and `Investments`) | Paying a CC bill — whether the savings-side debit to CRED Club or the BPPY/payment-received credit on the card statement — is settling debt, not new spend. The underlying purchases were already counted on the card statement, so writing the bill payment too would double-count. Filter is applied in both `lib/scan.js` and `app/api/upload-pdf/route.js`. The categorizer still tags these rows as `Credit Card Bill`; they just never reach the DB. To see them, relax the filter in those two write paths. |
 
 ## Known Issues / Open Items
 - Dashboard date windows in `lib/db.js` are hard-coded to `2026-04-01`–`2026-05-31`.
   PDF statements covering earlier dates land in the DB but won't render in the
   UI lists / trends until the window is widened.
-- PDF parser is tuned only to HDFC Diners Black layout. Axis CC / SBI / ICICI
-  statements will not parse; the route will return "No transactions detected".
+- ICICI parser's balance-diff logic relies on rows being processed in
+  statement order. If a PDF is multi-page and rows aren't perfectly sequential
+  (e.g. continuation rows split across pages), the first row of each page
+  may misclassify until the next row's balance corrects the chain.
+- Salary credits on ICICI savings (NEFT from employer) need to be filtered
+  out at ingest like Self Transfer / Investments / CC Bill payments are.
+  Currently they land in the DB and have to be deleted manually. A keyword
+  rule on `SALARY` / employer name in the raw transaction info would handle
+  this — same pattern as the existing non-expense filters.
+- HDFC PDF parser is tuned only to Diners Black layout. Axis CC / SBI / other
+  issuers will not parse; the upload route will return "No transactions
+  detected" if neither HDFC nor ICICI parsers match.
 - City names are glued onto merchant strings in HDFC PDF rows (e.g.
   `BIRKENSTOCKGURUGRAM`). Keyword categorization still works via substring
   match, but the Expenses table shows the raw glued string.
+- ICICI merchant strings retain bank-handle fragments (`/ICI...`, `/YES BANK
+  L/...`, `@hd`, `@ybl`) after cleanup. Categorization still works, but the
+  Expenses table shows visually noisy merchant cells for ICICI rows.
 
 ## Future Improvements
 - Add CSV/JSON export for all transactions
-- Multi-issuer PDF detection (Axis CC, ICICI, SBI) keyed off header text
+- Multi-issuer PDF detection (Axis CC, SBI, etc.) keyed off header text
 - Configurable / rolling dashboard date window instead of hard-coded months
 - Generate spend summary by month
 - Reconcile uploaded statement totals against Gmail-sourced rows for the same
   account / period (sanity check against double-counting)
+- Auto-filter salary credits at ingest, alongside Self Transfer / Investments
+  / CC Bill
+- Tighter ICICI merchant cleanup so the Expenses table is readable without
+  hovering for the raw transaction info
