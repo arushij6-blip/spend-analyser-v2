@@ -1,8 +1,12 @@
-# Spend Analyser
+# Spend Analyser v2
 
-A personal expense dashboard that reads Axis Bank transaction-alert emails from
-Gmail, parses + categorizes them, and surfaces them in a Next.js UI backed by
-SQLite.
+A personal expense dashboard. Ingests transactions from two sources:
+
+- **Gmail** — Axis Bank transaction-alert emails (via Gmail API)
+- **PDF upload** — HDFC Diners Black credit-card statements (parsed in-browser via `/api/upload-pdf`)
+
+Both sources flow through the same categorizer and write to one SQLite store,
+which feeds the Next.js dashboard.
 
 ## Stack
 - Next.js 15 (App Router) + React 18 + Tailwind CSS
@@ -48,6 +52,11 @@ The web UI exposes:
 - **Dashboard** — month-by-month KPIs, category breakdown, top transactions
 - **Expenses** — full transaction list with category editing
 - **Review** — uncategorized (Misc) items needing manual assignment
+
+Top-bar actions:
+- **Sync** — pull new transactions from all authenticated Gmail accounts
+- **Upload** — pick a PDF statement; rows are parsed, categorized, and merged
+  into the same store (re-uploading the same file is idempotent)
 
 ## What's gitignored
 
