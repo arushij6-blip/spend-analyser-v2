@@ -1,7 +1,7 @@
 {
-  "name": "axis-email-reader",
-  "version": "1.0.0",
-  "description": "Read Axis Bank transaction emails from Gmail; categorize and visualize spending",
+  "name": "spend-analyser-v2",
+  "version": "2.0.0",
+  "description": "Personal spend analyser: ingests transactions from Gmail (Axis Bank alerts) and uploaded credit-card statement PDFs (HDFC Diners), categorizes them, and visualizes spending",
   "type": "module",
   "scripts": {
     "auth": "node src/auth.js",
@@ -12,16 +12,17 @@
     "start": "next start -p 3001"
   },
   "dependencies": {
-    "googleapis": "^144.0.0",
+    "better-sqlite3": "^11.5.0",
     "dotenv": "^16.4.5",
+    "googleapis": "^144.0.0",
     "next": "^15.0.0",
+    "pdf-parse": "^2.4.5",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "better-sqlite3": "^11.5.0"
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "tailwindcss": "^3.4.14",
+    "autoprefixer": "^10.4.20",
     "postcss": "^8.4.49",
-    "autoprefixer": "^10.4.20"
+    "tailwindcss": "^3.4.14"
   }
 }
