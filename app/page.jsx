@@ -26,7 +26,9 @@ export default function Home() {
     try {
       const res = await fetch('/api/transactions', { cache: 'no-store' });
       const data = await res.json();
-      setTransactions(data.transactions ?? []);
+      // Credits are not expenses — drop them globally before they reach any tab.
+      const debitsOnly = (data.transactions ?? []).filter((t) => t.type === 'DEBIT');
+      setTransactions(debitsOnly);
     } catch (err) {
       console.error(err);
     } finally {
@@ -71,18 +73,17 @@ export default function Home() {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || 'Update failed');
     }
+    const data = await res.json().catch(() => ({}));
+    const bulk = new Set([messageId, ...(data.alsoUpdatedIds ?? [])]);
     setTransactions((prev) =>
-      prev.map((t) => (t.message_id === messageId ? { ...t, category, manually_edited: 1 } : t))
+      prev.map((t) => (bulk.has(t.message_id) ? { ...t, category, manually_edited: 1 } : t))
     );
   }
 
   const stats = useMemo(() => {
-    // Hero summary is May-only.
-    const inMay = transactions.filter((t) => t.date?.startsWith('2026-05'));
-    const debits = inMay.filter((t) => t.type === 'DEBIT');
-    const credits = inMay.filter((t) => t.type === 'CREDIT');
+    // Hero summary is May-only. Transactions are already debit-only.
+    const debits = transactions.filter((t) => t.date?.startsWith('2026-05'));
     const totalDebit = debits.reduce((s, t) => s + t.amount, 0);
-    const totalCredit = credits.reduce((s, t) => s + t.amount, 0);
 
     // Review badge stays global (all Misc across loaded range).
     const uncat = transactions.filter((t) => t.category === 'Misc' && !t.manually_edited).length;
@@ -94,8 +95,8 @@ export default function Home() {
     const top = [...byCat.entries()].sort((a, b) => b[1] - a[1])[0];
 
     return {
-      txnCount: inMay.length,
-      totalDebit, totalCredit,
+      txnCount: debits.length,
+      totalDebit,
       uncategorized: uncat,
       avg: debits.length ? totalDebit / debits.length : 0,
       topCategory: top ? { name: top[0], amount: top[1] } : null,
@@ -154,8 +155,14 @@ function TopBar({ onSync, syncing }) {
       <div className="max-w-[1180px] mx-auto px-8 h-14 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <Mark />
-          <div className="text-[13.5px] font-semibold tracking-tight" style={{ color: 'var(--ink-900)' }}>Spend</div>
-          <span className="ml-1 text-[11.5px]" style={{ color: 'var(--ink-400)' }}>Axis</span>
+          <div className="leading-tight">
+            <div className="text-[13.5px] font-semibold tracking-tight" style={{ color: 'var(--ink-900)' }}>
+              Ankush <span style={{ color: 'var(--accent)' }}>&amp;</span> Arushi
+            </div>
+            <div className="text-[10.5px] font-medium tracking-wide" style={{ color: 'var(--ink-400)' }}>
+              Financial Dashboard
+            </div>
+          </div>
         </div>
         <button
           onClick={onSync}
@@ -187,19 +194,24 @@ function TopBar({ onSync, syncing }) {
 
 function Mark() {
   return (
-    <div className="h-6 w-6 rounded-md flex items-center justify-center" style={{ background: 'var(--accent)' }}>
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M4 19V5l8 5 8-5v14" />
+    <div
+      className="h-7 w-7 rounded-lg flex items-center justify-center elev-1"
+      style={{ background: 'linear-gradient(135deg, var(--accent), #7c4dff)' }}
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="white" stroke="white" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
       </svg>
     </div>
   );
 }
 
 function Hero({ stats, loading }) {
-  const { totalDebit, txnCount, topCategory, totalCredit, avg } = stats;
+  const { totalDebit, txnCount, topCategory, avg } = stats;
 
   return (
-    <section className="pt-14 pb-10">
+    <section className="pt-14 pb-10 relative">
+      <HeroIllustration />
+
       <div className="text-[11px] uppercase tracking-[0.14em] font-medium" style={{ color: 'var(--ink-500)' }}>
         Spending overview · May 2026
       </div>
@@ -213,12 +225,6 @@ function Hero({ stats, loading }) {
             {loading ? '—' : (
               <span>
                 across <span className="font-medium num" style={{ color: 'var(--ink-900)' }}>{txnCount}</span> transactions
-                {totalCredit > 0 && (
-                  <>
-                    <span className="mx-2" style={{ color: 'var(--ink-300)' }}>·</span>
-                    <span className="num">{fmtAmount(totalCredit)}</span> received
-                  </>
-                )}
               </span>
             )}
           </div>
@@ -237,6 +243,58 @@ function Hero({ stats, loading }) {
         )}
       </div>
     </section>
+  );
+}
+
+function HeroIllustration() {
+  return (
+    <div
+      className="hidden md:block pointer-events-none absolute right-0 top-4 opacity-90"
+      aria-hidden="true"
+    >
+      <svg width="180" height="140" viewBox="0 0 180 140" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="potGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#fde2d8" />
+            <stop offset="100%" stopColor="#f4a78a" />
+          </linearGradient>
+          <linearGradient id="leafGrad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#8ed1a3" />
+            <stop offset="100%" stopColor="#3e8c5c" />
+          </linearGradient>
+          <linearGradient id="coinGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#ffe9a8" />
+            <stop offset="100%" stopColor="#f0b94b" />
+          </linearGradient>
+        </defs>
+
+        {/* falling coins (lightly suspended) */}
+        <g opacity="0.85">
+          <circle cx="42" cy="22" r="7" fill="url(#coinGrad)" stroke="#c98b2c" strokeWidth="1" />
+          <text x="42" y="26" textAnchor="middle" fontSize="9" fontWeight="700" fill="#7a5418">₹</text>
+          <circle cx="22" cy="50" r="5.5" fill="url(#coinGrad)" stroke="#c98b2c" strokeWidth="1" />
+          <text x="22" y="53.5" textAnchor="middle" fontSize="7" fontWeight="700" fill="#7a5418">₹</text>
+          <circle cx="58" cy="58" r="6" fill="url(#coinGrad)" stroke="#c98b2c" strokeWidth="1" />
+          <text x="58" y="62" textAnchor="middle" fontSize="8" fontWeight="700" fill="#7a5418">₹</text>
+        </g>
+
+        {/* plant stem */}
+        <path d="M115 105 C 115 85, 118 65, 122 50" stroke="#4a7c5c" strokeWidth="2.5" strokeLinecap="round" fill="none" />
+        {/* left leaf */}
+        <path d="M115 78 C 95 72, 88 58, 95 48 C 108 50, 118 62, 115 78 Z" fill="url(#leafGrad)" />
+        {/* right leaf */}
+        <path d="M120 65 C 142 60, 150 46, 144 34 C 130 34, 118 48, 120 65 Z" fill="url(#leafGrad)" />
+        {/* top leaf (heart-shaped) */}
+        <path d="M122 50 C 120 38, 112 32, 118 24 C 124 22, 130 30, 122 50 Z" fill="url(#leafGrad)" />
+
+        {/* pot */}
+        <path d="M95 105 L 105 130 L 140 130 L 150 105 Z" fill="url(#potGrad)" stroke="#c97a5a" strokeWidth="1.5" strokeLinejoin="round" />
+        <rect x="93" y="100" width="59" height="8" rx="2" fill="#f4a78a" stroke="#c97a5a" strokeWidth="1.5" />
+
+        {/* heart spark */}
+        <path d="M158 78 C 162 74, 168 76, 168 81 C 168 85, 162 89, 158 92 C 154 89, 148 85, 148 81 C 148 76, 154 74, 158 78 Z" fill="#f06292" opacity="0.85" />
+      </svg>
+    </div>
   );
 }
 

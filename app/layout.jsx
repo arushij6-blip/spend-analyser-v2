@@ -8,7 +8,7 @@ const inter = Inter({
 });
 
 export const metadata = {
-  title: 'Spend · Axis',
+  title: "Ankush & Arushi's Financial Dashboard",
   description: 'Personal spend analytics',
 };
 

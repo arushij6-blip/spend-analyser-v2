@@ -72,12 +72,7 @@ export default function ReviewTab({ transactions, onUpdateCategory, categories }
                     {(t.merchant ?? '').replace(/\s+/g, ' ').trim() || <span className="text-neutral-400">—</span>}
                   </td>
                   <td className="px-6 py-3.5 text-right num font-semibold whitespace-nowrap tighter">
-                    <span
-                      className={t.type === 'CREDIT' ? '' : 'text-neutral-900'}
-                      style={t.type === 'CREDIT' ? { color: 'var(--positive)' } : {}}
-                    >
-                      {t.type === 'CREDIT' ? '+' : ''}{fmtAmount(t.amount)}
-                    </span>
+                    <span className="text-neutral-900">{fmtAmount(t.amount)}</span>
                   </td>
                   <td className="px-6 py-3.5 text-[11.5px] text-neutral-500 max-w-[260px] truncate mono" title={t.raw_transaction_info ?? ''}>
                     {t.raw_transaction_info ?? '—'}

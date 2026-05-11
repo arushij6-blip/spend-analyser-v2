@@ -23,10 +23,8 @@ export default function DashboardTab({ transactions }) {
     [transactions, month]
   );
 
-  const debits = monthTxns.filter((t) => t.type === 'DEBIT');
-  const credits = monthTxns.filter((t) => t.type === 'CREDIT');
+  const debits = monthTxns;
   const totalDebit = debits.reduce((s, t) => s + t.amount, 0);
-  const totalCredit = credits.reduce((s, t) => s + t.amount, 0);
   const avgTicket = debits.length ? totalDebit / debits.length : 0;
 
   const byCategory = useMemo(() => {
@@ -48,7 +46,7 @@ export default function DashboardTab({ transactions }) {
   const prevDebit = useMemo(() => {
     if (!prevMonth) return null;
     return transactions
-      .filter((t) => t.date?.startsWith(prevMonth) && t.type === 'DEBIT')
+      .filter((t) => t.date?.startsWith(prevMonth))
       .reduce((s, t) => s + t.amount, 0);
   }, [transactions, prevMonth]);
 
@@ -89,7 +87,7 @@ export default function DashboardTab({ transactions }) {
       </div>
 
       {/* KPI grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <Kpi
           label="Total spend"
           value={fmtAmount(totalDebit)}
@@ -102,13 +100,7 @@ export default function DashboardTab({ transactions }) {
             )
           }
         />
-        <Kpi label="Avg ticket" value={fmtAmount(avgTicket)} footer={`across ${debits.length} debits`} />
-        <Kpi
-          label="Money in"
-          value={fmtAmount(totalCredit)}
-          valueColor="var(--positive)"
-          footer={`${credits.length} credits`}
-        />
+        <Kpi label="Avg ticket" value={fmtAmount(avgTicket)} footer={`across ${debits.length} transactions`} />
         <Kpi
           label="Top category"
           value={byCategory[0]?.name ?? '—'}

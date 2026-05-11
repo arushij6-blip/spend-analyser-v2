@@ -30,14 +30,14 @@ export async function PATCH(req) {
         { status: 400 }
       );
     }
-    const changed = updateCategory(messageId, category, { learn });
-    if (changed === 0) {
+    const { changes, alsoUpdatedIds } = updateCategory(messageId, category, { learn });
+    if (changes === 0) {
       return NextResponse.json(
         { error: `No transaction found with messageId=${messageId}` },
         { status: 404 }
       );
     }
-    return NextResponse.json({ ok: true, learned: learn });
+    return NextResponse.json({ ok: true, learned: learn, alsoUpdatedIds });
   } catch (err) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
