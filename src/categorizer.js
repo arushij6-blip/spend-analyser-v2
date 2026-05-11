@@ -75,6 +75,15 @@ const CREDIT_CARD_BILL_KEYWORDS = [
   'CC PAYMENT',
 ];
 
+// -------- Non-refund CREDIT keywords (salary, income, investments, internal transfers) --------
+const NON_REFUND_CREDITS = [
+  'SALARY', 'PAYROLL', 'SALARY IN', 'SALARY CR',
+  'ZERODHA', 'ICCL', 'GROWW', 'UPSTOX', 'KUVERA', 'COIN BY ZERODHA', 'SMALLCASE',
+  'FD', 'TERM DEPOSIT', 'FIXED DEPOSIT', 'TD FROM', 'FD FROM', 'INTEREST',
+  'DIVIDEND', 'BONUS', 'STOCK', 'MUTUAL FUND',
+  'TRANSFER IN', 'CREDIT TRANSFER', 'NEFT IN',
+];
+
 // -------- Merchant keyword rules --------
 // Order matters: more specific patterns first.
 const MERCHANT_RULES = [
@@ -185,6 +194,31 @@ const MERCHANT_RULES = [
 export function categorize(txn, learnedRules) {
   const out = { ...txn };
 
+  const merchant = (txn.merchant ?? '').toUpperCase();
+  const rawInfo = (txn.rawTransactionInfo ?? '').toUpperCase();
+
+  // 0) Detect refunds: CREDIT transactions that aren't known non-refund income sources
+  let isRefund = false;
+  if (txn.type === 'CREDIT') {
+    // Check if this is a known non-refund credit (salary, investment, internal transfer, etc.)
+    let isNonRefundCredit = false;
+    for (const kw of NON_REFUND_CREDITS) {
+      if (merchant.includes(kw) || rawInfo.includes(kw)) {
+        isNonRefundCredit = true;
+        break;
+      }
+    }
+    // If it's a CREDIT and NOT a known non-refund credit, it's a refund
+    isRefund = !isNonRefundCredit;
+  }
+
+  out.isRefund = isRefund;
+  if (isRefund) {
+    out.category = 'Shopping';
+    out.subCategory = 'Refund';
+    return out;
+  }
+
   // 1) Self-transfer & Investments: not expenses, filtered during scan
   if (txn.category === 'SELF-TRANSFER') {
     out.category = 'Self Transfer';
@@ -197,9 +231,6 @@ export function categorize(txn, learnedRules) {
     out.subCategory = null;
     return out;
   }
-
-  const merchant = (txn.merchant ?? '').toUpperCase();
-  const rawInfo = (txn.rawTransactionInfo ?? '').toUpperCase();
 
   // 2a) Term/fixed deposit movements — own-money transfers, not expenses
   if (merchant || rawInfo) {

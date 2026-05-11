@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { parseStatementPdf } from '../../../src/pdf-statement-parser.js';
+import { parseIciciStatementPdf } from '../../../src/icici-pdf-statement-parser.js';
 import { categorize } from '../../../src/categorizer.js';
 import { getLearnedRules, upsertTransactions } from '../../../lib/db.js';
 
@@ -28,13 +29,29 @@ export async function POST(req) {
 
     let parsed;
     try {
+      // Try HDFC parser first
       parsed = await parseStatementPdf(buffer, { fileName: file.name ?? 'statement.pdf' });
+
+      // If HDFC parser found nothing, try ICICI parser
+      if (parsed.transactions.length === 0) {
+        console.log('[upload-pdf] HDFC parser found 0 rows, trying ICICI parser...');
+        parsed = await parseIciciStatementPdf(buffer, {
+          fileName: file.name ?? 'statement.pdf',
+          source: 'ICICI Bank'
+        });
+      }
     } catch (err) {
+      console.error('[upload-pdf] parser threw:', err);
       const msg = /password/i.test(err.message)
         ? 'PDF is password-protected. Please upload an unlocked PDF.'
         : `Could not read PDF: ${err.message}`;
       return NextResponse.json({ error: msg }, { status: 400 });
     }
+
+    const parserUsed = parsed.source === 'ICICI Bank' ? 'ICICI' : 'HDFC';
+    console.log(
+      `[upload-pdf] file=${file.name} parser=${parserUsed} pages=${parsed.pageCount} account=${parsed.cardAccount || parsed.accountNumber} parsedRows=${parsed.transactions.length}`
+    );
 
     if (parsed.transactions.length === 0) {
       return NextResponse.json({
@@ -51,8 +68,15 @@ export async function POST(req) {
     const rows = [];
     for (const txn of parsed.transactions) {
       const recat = categorize(txn, learnedRules);
-      // Mirror runScan: drop non-expense flows so they don't pollute the UI totals.
-      if (recat.category === 'Self Transfer' || recat.category === 'Investments') continue;
+      // Mirror runScan: drop non-expense flows so they don't pollute the UI
+      // totals. Credit Card Bill payments are excluded too — the underlying
+      // purchases are already counted on the card statement, so writing the
+      // payment as well double-counts spend.
+      if (
+        recat.category === 'Self Transfer' ||
+        recat.category === 'Investments' ||
+        recat.category === 'Credit Card Bill'
+      ) continue;
       rows.push({
         message_id: txn.messageId,
         date: recat.date,
@@ -71,15 +95,18 @@ export async function POST(req) {
         email_subject: txn.emailSubject,
         email_received_at: txn.emailReceivedAt,
         source: txn.source,
+        is_refund: recat.isRefund ? 1 : 0,
       });
     }
 
     const { inserted, updated } = upsertTransactions(rows);
 
+    const account = parsed.cardAccount || parsed.accountNumber;
     return NextResponse.json({
       ok: true,
       file: file.name,
-      cardAccount: parsed.cardAccount,
+      account,
+      parser: parserUsed,
       pageCount: parsed.pageCount,
       found: parsed.transactions.length,
       written: rows.length,
@@ -87,6 +114,7 @@ export async function POST(req) {
       updated,
     });
   } catch (err) {
+    console.error('[upload-pdf] route threw:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

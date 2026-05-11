@@ -163,6 +163,7 @@ sending infra is known to change over time.
 | PDF parsing server-side in API route | Keeps the binary off the wire after one hop and reuses the same `categorize()` + DB code path as Gmail rows |
 | Synthetic `message_id` `pdf:<fileTag>:<rowHash>` for uploaded rows | Makes re-uploading a statement idempotent; collides on identical row text so accidental double-uploads merge instead of duplicating |
 | Hardcoded source label `HDFC Credit Card` for uploaded rows | Only one issuer supported today; will be replaced with header-text detection when a second issuer lands |
+| Drop `Credit Card Bill` rows at ingest (alongside `Self Transfer` and `Investments`) | Paying a CC bill — whether the savings-side debit to CRED Club or the BPPY/payment-received credit on the card statement — is settling debt, not new spend. The underlying purchases were already counted on the card statement, so writing the bill payment too would double-count. Filter is applied in both `lib/scan.js` and `app/api/upload-pdf/route.js`. The categorizer still tags these rows as `Credit Card Bill`; they just never reach the DB. To see them, relax the filter in those two write paths. |
 
 ## Known Issues / Open Items
 - Dashboard date windows in `lib/db.js` are hard-coded to `2026-04-01`–`2026-05-31`.
