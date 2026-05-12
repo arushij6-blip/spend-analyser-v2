@@ -141,8 +141,7 @@ export default function ExpensesTab({ transactions, onUpdateCategory, categories
       ) : (
         monthGroups.map(([month, monthTxns]) => {
           const monthDebit = monthTxns
-            .filter((t) => t.type === 'DEBIT')
-            .reduce((s, t) => s + t.amount, 0);
+            .reduce((s, t) => s + (t.type === 'DEBIT' ? t.amount : -t.amount), 0);
 
           return (
             <section key={month} className="bg-white border rounded-2xl overflow-hidden elev-1" style={{ borderColor: 'var(--hairline)' }}>
