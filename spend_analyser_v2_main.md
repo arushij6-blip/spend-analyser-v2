@@ -44,15 +44,20 @@ spend-analyser-v2/ (dir still named axis-email-reader)
 │   └── validate-one.js                # CLI: fetch ONE email, sanity-check parser output
 ├── app/
 │   ├── page.jsx                       # Dashboard shell (TopBar with Sync + Upload, tabs)
-│   ├── components/                    # Dashboard / Expenses / Review / Trends tabs
+│   ├── components/                    # Dashboard / Expenses / Budgets / Review / Trends tabs
 │   └── api/
 │       ├── scan/route.js              # POST → run Gmail scan
 │       ├── upload-pdf/route.js        # POST (multipart) → parse PDF, categorize, upsert
 │       ├── transactions/              # GET list / PATCH category
-│       └── trends/                    # GET monthly category totals
+│       ├── trends/                    # GET monthly category totals
+│       └── budgets/                   # GET list (budgets + live spend) / PUT upsert
+│           └── check-alerts/          # POST → evaluate 80%/100% thresholds, send Telegram
 ├── lib/
 │   ├── db.js                          # SQLite layer (better-sqlite3, single source of truth)
-│   └── scan.js                        # runScan() — used by /api/scan and future CLI
+│   ├── scan.js                        # runScan() — used by /api/scan and future CLI
+│   ├── telegram.js                    # Minimal Telegram Bot API sender (env-driven)
+│   ├── alert-tones.js                 # Reusable playful copy pools per threshold
+│   └── budget-alerts.js               # Orchestrator: compare spend vs budget, dedup, dispatch
 └── data/
     └── app.db                         # SQLite store (gitignored)
 ```
@@ -295,6 +300,98 @@ and after PDF extraction both look identical. Fix: track balance changes
 between consecutive rows and infer type from the sign of the diff. When the
 underlying text strips structural cues, derive the missing signal from
 something else in the document (here, the running balance).
+
+## Budgets & Telegram Alerts
+
+The **Budgets** tab lets the user set a monthly spend cap per category. The
+cap is compared in real time against net spend for the current month (same
+DEBIT − CREDIT convention used by Trends), and the Telegram bot sends one
+soft alert when usage crosses **80%**, and one more when it crosses **100%**.
+
+### Data model
+
+```sql
+CREATE TABLE budgets (
+  category    TEXT NOT NULL,
+  month       TEXT NOT NULL,           -- 'YYYY-MM'
+  amount      REAL NOT NULL,
+  updated_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (category, month)
+);
+
+CREATE TABLE budget_alerts (
+  category    TEXT NOT NULL,
+  month       TEXT NOT NULL,           -- 'YYYY-MM'
+  threshold   INTEGER NOT NULL,        -- 80 or 100
+  sent_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (category, month, threshold)
+);
+```
+
+Budgets are stored per (category, month) so future months can be planned
+without touching prior data. The `budget_alerts` table is the canonical
+record of "already sent" — its composite PK is the dedup mechanism. Two
+distinct rows per month per category (one for 80, one for 100) means the
+two thresholds fire independently.
+
+### Modules
+
+- **`lib/telegram.js`** — thin wrapper around `https://api.telegram.org/.../sendMessage`.
+  Reads `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` at call time (not import
+  time), never logs them, returns `{ ok, error? }` and never throws.
+- **`lib/alert-tones.js`** — reusable tone/style system. Threshold-keyed
+  pools of one-liners + a deterministic picker (hash of
+  `category|month|threshold`) so the same alert always renders identically.
+  This file knows nothing about Telegram, budgets, or the DB — pure copy.
+  Adding a new threshold or rotating copy = edit one file.
+- **`lib/budget-alerts.js`** — orchestrator. Walks `getBudgetsForMonth()`,
+  pulls live net spend via `getCategorySpendForMonth()`, and for each
+  budgeted category checks 80 then 100. Before sending it asks
+  `wasAlertSent()`; after a successful send it calls `markAlertSent()`. If
+  Telegram credentials aren't configured it skips without marking — so
+  wiring credentials later will surface still-due alerts on the next check.
+
+### Triggers
+
+`checkAndSendBudgetAlertsAsync()` is fire-and-forget and called from both
+write paths immediately after the upsert:
+
+1. `lib/scan.js` — after Gmail scan writes settle.
+2. `app/api/upload-pdf/route.js` — after PDF rows are upserted.
+
+There is also a manual endpoint, `POST /api/budgets/check-alerts`, which is
+idempotent for the same reason (the dedup table). Useful for a future cron
+or as a debug hook.
+
+### Mobile-first UX (`app/components/BudgetsTab.jsx`)
+
+- Each budgeted category is its own card: name, `spent of budget`, progress
+  bar, `₹X left` or `₹X over`, and a percentage. Bar color shifts from blue
+  (calm) → warm → over once 80% / 100% are crossed, mirroring the Telegram
+  threshold semantics.
+- Inline edit via a bottom sheet on mobile / centered card on desktop. The
+  amount field is pre-filled with last month's net spend for that category
+  when available (sensible default), and "Use last month: ₹X" is offered as
+  a one-tap fill.
+- Empty state shows a planted-seed illustration + top 4 last-month
+  categories as one-tap suggestions, so the first budget can be set in a
+  single tap.
+- Unbudgeted categories appear in a quieter "Not budgeted yet" grid below
+  the main list with a primary `Set` button — every category is one tap
+  from being budgeted, no navigation needed.
+
+### Env config
+
+Add to `.env.local` (or wherever Next.js reads env from in this project):
+
+```
+TELEGRAM_BOT_TOKEN=...   # from @BotFather
+TELEGRAM_CHAT_ID=...     # numeric chat id (user or group)
+```
+
+These are read inside `sendTelegramMessage` at call time, so editing them
+during dev only requires the Next.js auto-reload. Per project rule #2 they
+are never echoed back to the client and never logged.
 
 ## Database Schema
 
