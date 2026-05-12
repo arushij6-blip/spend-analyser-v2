@@ -3,6 +3,7 @@ import { parseStatementPdf } from '../../../src/pdf-statement-parser.js';
 import { parseIciciStatementPdf } from '../../../src/icici-pdf-statement-parser.js';
 import { categorize } from '../../../src/categorizer.js';
 import { getLearnedRules, upsertTransactions } from '../../../lib/db.js';
+import { checkAndSendBudgetAlertsAsync } from '../../../lib/budget-alerts.js';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
@@ -100,6 +101,9 @@ export async function POST(req) {
     }
 
     const { inserted, updated } = upsertTransactions(rows);
+
+    // Best-effort budget alert check after fresh rows land. Non-blocking.
+    checkAndSendBudgetAlertsAsync();
 
     const account = parsed.cardAccount || parsed.accountNumber;
     return NextResponse.json({
