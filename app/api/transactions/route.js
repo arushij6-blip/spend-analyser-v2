@@ -1,10 +1,22 @@
 import { NextResponse } from 'next/server';
-import { getAllTransactions, updateCategory } from '../../../lib/db.js';
+import {
+  getAllTransactions,
+  getTopTransactionsForCategoryMonth,
+  updateCategory,
+} from '../../../lib/db.js';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(req) {
   try {
+    const { searchParams } = new URL(req.url);
+    const category = searchParams.get('category');
+    const month = searchParams.get('month');
+    if (category && month) {
+      const limit = Math.min(50, Number(searchParams.get('limit') ?? 5));
+      const rows = getTopTransactionsForCategoryMonth(category, month, limit);
+      return NextResponse.json({ transactions: rows });
+    }
     const rows = getAllTransactions();
     return NextResponse.json({ transactions: rows });
   } catch (err) {
