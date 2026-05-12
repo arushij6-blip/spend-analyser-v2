@@ -122,16 +122,22 @@ export default function Home() {
   );
 
   const stats = useMemo(() => {
-    // Hero summary is May-only, debits only.
-    const debits = debitTransactions.filter((t) => t.date?.startsWith('2026-05'));
-    const totalDebit = debits.reduce((s, t) => s + t.amount, 0);
+    // Hero summary is May-only. Net of refunds: DEBIT − CREDIT, matching
+    // the Expenses tab's per-month signed-sum so the two never drift.
+    const monthTxns = transactions.filter((t) => t.date?.startsWith('2026-05'));
+    const debits = monthTxns.filter((t) => t.type === 'DEBIT');
+    const totalDebit = monthTxns.reduce(
+      (s, t) => s + (t.type === 'DEBIT' ? t.amount : -t.amount),
+      0
+    );
 
     // Review badge stays global (all Misc debits across loaded range).
     const uncat = debitTransactions.filter((t) => t.category === 'Misc' && !t.manually_edited).length;
 
     const byCat = new Map();
-    for (const t of debits) {
-      byCat.set(t.category, (byCat.get(t.category) ?? 0) + t.amount);
+    for (const t of monthTxns) {
+      const delta = t.type === 'DEBIT' ? t.amount : -t.amount;
+      byCat.set(t.category, (byCat.get(t.category) ?? 0) + delta);
     }
     const top = [...byCat.entries()].sort((a, b) => b[1] - a[1])[0];
 
@@ -142,7 +148,7 @@ export default function Home() {
       avg: debits.length ? totalDebit / debits.length : 0,
       topCategory: top ? { name: top[0], amount: top[1] } : null,
     };
-  }, [debitTransactions]);
+  }, [transactions, debitTransactions]);
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: 'var(--bg)' }}>
@@ -171,7 +177,7 @@ export default function Home() {
             ) : (
               <div className="fade-in">
                 {active === 'dashboard' && (
-                  <DashboardTab transactions={debitTransactions} />
+                  <DashboardTab transactions={transactions} />
                 )}
                 {active === 'expenses' && (
                   <ExpensesTab
