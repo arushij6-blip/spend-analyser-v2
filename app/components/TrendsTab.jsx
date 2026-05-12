@@ -6,6 +6,7 @@ import { fmtAmount } from './categories.js';
 export default function TrendsTab() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [drill, setDrill] = useState(null); // { category, month, rows, loading }
 
   useEffect(() => {
     (async () => {
@@ -108,7 +109,11 @@ export default function TrendsTab() {
                     const max = maxCellByCat.get(cat) ?? 0;
                     return (
                       <td key={mo} className="px-6 py-3.5 text-right num align-middle" style={{ minWidth: 140 }}>
-                        <Cell value={v} max={max} />
+                        <Cell
+                          value={v}
+                          max={max}
+                          onClick={v > 0 ? () => openDrill(cat, mo, setDrill) : undefined}
+                        />
                       </td>
                     );
                   })}
@@ -132,22 +137,107 @@ export default function TrendsTab() {
           </table>
         </div>
       </section>
+
+      {drill && <DrillModal drill={drill} onClose={() => setDrill(null)} />}
     </div>
   );
 }
 
-function Cell({ value, max }) {
+async function openDrill(category, month, setDrill) {
+  setDrill({ category, month, rows: [], loading: true });
+  try {
+    const res = await fetch(
+      `/api/transactions?category=${encodeURIComponent(category)}&month=${encodeURIComponent(month)}&limit=5`,
+      { cache: 'no-store' }
+    );
+    const data = await res.json();
+    setDrill({ category, month, rows: data.transactions ?? [], loading: false });
+  } catch (err) {
+    console.error(err);
+    setDrill({ category, month, rows: [], loading: false });
+  }
+}
+
+function DrillModal({ drill, onClose }) {
+  const { category, month, rows, loading } = drill;
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl elev-1 w-full max-w-xl mx-4 overflow-hidden"
+        style={{ borderColor: 'var(--hairline)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-6 py-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--hairline)' }}>
+          <div>
+            <div className="text-[10.5px] uppercase tracking-[0.12em] text-neutral-400 font-medium">
+              Top 5 — {formatMonth(month)}
+            </div>
+            <div className="text-[14px] font-semibold tighter text-neutral-900 mt-0.5 inline-flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full" style={{ background: catDot(category) }} />
+              {category}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-neutral-400 hover:text-neutral-700 text-[18px] leading-none px-2"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+        <div className="max-h-[60vh] overflow-y-auto">
+          {loading ? (
+            <div className="p-6 space-y-2">
+              {[0, 1, 2, 3, 4].map((i) => <div key={i} className="skeleton h-10 rounded-lg" />)}
+            </div>
+          ) : rows.length === 0 ? (
+            <div className="px-6 py-10 text-center text-[13px] text-neutral-500">
+              No transactions.
+            </div>
+          ) : (
+            <table className="w-full text-[13px]">
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.message_id} className="border-b last:border-b-0" style={{ borderColor: 'var(--hairline)' }}>
+                    <td className="px-6 py-3 align-top">
+                      <div className="font-medium text-neutral-900 truncate max-w-[320px]" title={r.merchant}>
+                        {r.merchant || '—'}
+                      </div>
+                      <div className="text-[11.5px] text-neutral-500 mt-0.5">
+                        {r.date}{r.source ? ` · ${r.source}` : ''}
+                      </div>
+                    </td>
+                    <td className="px-6 py-3 text-right num font-semibold text-neutral-900 tighter whitespace-nowrap">
+                      {fmtAmount(r.amount)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Cell({ value, max, onClick }) {
   if (value <= 0) return <span className="text-neutral-300">—</span>;
   const ratio = max > 0 ? value / max : 0;
   // soft blue heat fill, magnitude-weighted
   const bgAlpha = Math.min(0.16, 0.05 + ratio * 0.11);
   return (
-    <span
-      className="inline-block px-2 py-0.5 rounded-md font-medium tighter"
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-block px-2 py-0.5 rounded-md font-medium tighter cursor-pointer hover:ring-1 hover:ring-blue-300 transition"
       style={{ background: `rgba(37,99,235,${bgAlpha})`, color: 'var(--ink-900)' }}
     >
       {fmtAmount(value)}
-    </span>
+    </button>
   );
 }
 
