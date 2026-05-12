@@ -5,11 +5,13 @@ import DashboardTab from './components/DashboardTab.jsx';
 import ExpensesTab from './components/ExpensesTab.jsx';
 import ReviewTab from './components/ReviewTab.jsx';
 import TrendsTab from './components/TrendsTab.jsx';
+import BudgetsTab from './components/BudgetsTab.jsx';
 import { CATEGORIES, fmtAmount } from './components/categories.js';
 
 const TABS = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'expenses', label: 'Expenses' },
+  { id: 'budgets', label: 'Budgets' },
   { id: 'review', label: 'Review' },
   { id: 'trends', label: 'Trends' },
 ];
@@ -193,6 +195,7 @@ export default function Home() {
                     categories={CATEGORIES}
                   />
                 )}
+                {active === 'budgets' && <BudgetsTab />}
                 {active === 'trends' && <TrendsTab />}
               </div>
             )}
