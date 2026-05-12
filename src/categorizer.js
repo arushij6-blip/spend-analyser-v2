@@ -3,14 +3,21 @@
  *
  * Pipeline (highest priority first):
  *   1. SELF-TRANSFER       → filtered out by fetch-all (not an expense)
- *   2. Investments keywords → "Investments" (filtered out by fetch-all)
- *   3. Credit Card Bill keywords → "Credit Card Bill"
- *   4. Staff Salary names  → explicit merchant matches → "Staff Salaries"
- *   5. LEARNED RULES       → user-confirmed merchant → category overrides
- *   6. Daily Commute rule  → amount ≤ 150 AND time in commute windows (DEBIT only)
- *   7. Ordering In rule    → Zomato / Swiggy → "Ordering In"
- *   8. Merchant keyword rules → see MERCHANT_RULES below
- *   9. Shape-based fallback → UPI-P2A → "Misc"; rest → "Misc"
+ *   2. FD/TD movements     → "Self Transfer" (own-money, filtered out)
+ *   3. Investments keywords → "Investments" (filtered out by fetch-all)
+ *   4. Credit Card Bill keywords → "Credit Card Bill" (filtered out)
+ *   5. Staff Salary names  → explicit merchant matches → "Staff Salaries"
+ *   6. Refund detection    → CREDIT not in non-refund allowlist → Shopping/Refund
+ *   7. LEARNED RULES       → user-confirmed merchant → category overrides
+ *   8. Daily Commute rule  → amount ≤ 150 AND time in commute windows (DEBIT only)
+ *   9. Ordering In rule    → Zomato / Swiggy → "Ordering In"
+ *  10. Merchant keyword rules → see MERCHANT_RULES below
+ *  11. Shape-based fallback → UPI-P2A → "Misc"; rest → "Misc"
+ *
+ * IMPORTANT ordering invariant: non-expense filters (steps 1–5) MUST run
+ * BEFORE refund detection (step 6). A CREDIT can be a self-transfer, a TD
+ * maturity, an investment settlement, or a CC bill payment — none of those
+ * are refunds. See RCA #9.
  *
  * Categories (11 total):
  *   Groceries, Shopping, Daily Commute, Travel, Home Maintenance,
@@ -197,42 +204,16 @@ export function categorize(txn, learnedRules) {
   const merchant = (txn.merchant ?? '').toUpperCase();
   const rawInfo = (txn.rawTransactionInfo ?? '').toUpperCase();
 
-  // 0) Detect refunds: CREDIT transactions that aren't known non-refund income sources
-  let isRefund = false;
-  if (txn.type === 'CREDIT') {
-    // Check if this is a known non-refund credit (salary, investment, internal transfer, etc.)
-    let isNonRefundCredit = false;
-    for (const kw of NON_REFUND_CREDITS) {
-      if (merchant.includes(kw) || rawInfo.includes(kw)) {
-        isNonRefundCredit = true;
-        break;
-      }
-    }
-    // If it's a CREDIT and NOT a known non-refund credit, it's a refund
-    isRefund = !isNonRefundCredit;
-  }
+  out.isRefund = false;
 
-  out.isRefund = isRefund;
-  if (isRefund) {
-    out.category = 'Shopping';
-    out.subCategory = 'Refund';
-    return out;
-  }
-
-  // 1) Self-transfer & Investments: not expenses, filtered during scan
+  // 1) Self-transfer (parser-tagged via MOB/SELFFT) — not an expense
   if (txn.category === 'SELF-TRANSFER') {
     out.category = 'Self Transfer';
     out.subCategory = null;
     return out;
   }
 
-  if (txn.category === 'Investments') {
-    out.category = 'Investments';
-    out.subCategory = null;
-    return out;
-  }
-
-  // 2a) Term/fixed deposit movements — own-money transfers, not expenses
+  // 2) Term/fixed deposit movements — own-money transfers, not expenses
   if (merchant || rawInfo) {
     for (const kw of FD_TRANSFER_KEYWORDS) {
       if (merchant.includes(kw) || rawInfo.includes(kw)) {
@@ -243,7 +224,12 @@ export function categorize(txn, learnedRules) {
     }
   }
 
-  // 2b) Investment platforms (Zerodha etc.) — filtered out as non-expenses downstream
+  // 3) Investments (parser-tagged or keyword)
+  if (txn.category === 'Investments') {
+    out.category = 'Investments';
+    out.subCategory = null;
+    return out;
+  }
   if (merchant || rawInfo) {
     for (const kw of INVESTMENT_KEYWORDS) {
       if (merchant.includes(kw) || rawInfo.includes(kw)) {
@@ -254,7 +240,7 @@ export function categorize(txn, learnedRules) {
     }
   }
 
-  // 3) Credit Card Bill payments (CRED Club etc.)
+  // 4) Credit Card Bill payments (CRED Club etc.)
   if (merchant || rawInfo) {
     for (const kw of CREDIT_CARD_BILL_KEYWORDS) {
       if (merchant.includes(kw) || rawInfo.includes(kw)) {
@@ -265,7 +251,7 @@ export function categorize(txn, learnedRules) {
     }
   }
 
-  // 4) Staff salary explicit matches
+  // 5) Staff salary explicit matches
   if (merchant) {
     for (const pattern of STAFF_SALARY_PATTERNS) {
       if (merchant.includes(pattern)) {
@@ -273,6 +259,25 @@ export function categorize(txn, learnedRules) {
         out.subCategory = 'Staff payment';
         return out;
       }
+    }
+  }
+
+  // 6) Refund detection — MUST run AFTER non-expense filters above.
+  // A CREDIT can be a self-transfer / TD maturity / investment settlement /
+  // CC bill payment — none of those are refunds. See RCA #9.
+  if (txn.type === 'CREDIT') {
+    let isNonRefundCredit = false;
+    for (const kw of NON_REFUND_CREDITS) {
+      if (merchant.includes(kw) || rawInfo.includes(kw)) {
+        isNonRefundCredit = true;
+        break;
+      }
+    }
+    if (!isNonRefundCredit) {
+      out.isRefund = true;
+      out.category = 'Shopping';
+      out.subCategory = 'Refund';
+      return out;
     }
   }
 
