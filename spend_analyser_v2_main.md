@@ -180,12 +180,22 @@ When a transaction is flagged as a refund, the categorizer:
 - Returns immediately (refund detection wins over all keyword rules)
 
 The DB stores this as `is_refund INTEGER` on the `transactions` table.
-Monthly category totals subtract refund amounts:
-```sql
-SUM(CASE WHEN is_refund = 1 THEN -amount ELSE amount END) AS total
-```
-So a category whose net spend is ₹49,083 = ₹89,228 in debits − ₹40,145 in
-refunds.
+Monthly category totals are computed in two layers:
+
+1. `getMonthlyCategoryTotals()` in `lib/db.js` returns `SUM(amount)` grouped
+   by `(month, category, type)` — so DEBITs and CREDITs come back as
+   separate rows, both as positive sums.
+2. `TrendsTab.jsx` reduces those rows with `delta = type === 'DEBIT' ?
+   total : -total`. CREDITs (which by construction in this categorizer are
+   either refunds → Shopping/Refund, or non-refund credits that landed in
+   the same category) subtract from the net.
+
+So a Shopping month with ₹97,941.90 in debits and ₹63,129.51 in refunds
+nets to ₹34,812.39.
+
+`is_refund` is still useful for splitting `expense_count` vs `refund_count`
+and for the Expenses tab's green `+` styling — it's just no longer used in
+the net-total SQL itself.
 
 The dashboard already paints CREDIT rows green with a leading `+`, so refund
 rows display correctly without any UI change.
@@ -230,6 +240,50 @@ The user actually flagged this in the very first message ("sender email address 
 can be axis.in, axis.com, alerts @axis. something"). The fix: include BOTH senders in
 `buildQuery()`. Always cast a wide net for sender domains on bank/utility alerts where the
 sending infra is known to change over time.
+
+### Lesson learned (recorded for RCA #10)
+April Shopping was rendering as ₹1,61,071 on the Trends tab when the true
+net (debits ₹97,941.90 − refunds ₹63,129.51) was ₹34,812.39. Root cause:
+refund subtraction was applied twice. The SQL in `getMonthlyCategoryTotals()`
+returned `SUM(CASE WHEN is_refund = 1 THEN -amount ELSE amount END)` per
+`(month, category, type)`, so the CREDIT row for refunds came back as a
+negative number. Then `TrendsTab.jsx` ran `delta = type === 'DEBIT' ? total
+: -total`, flipping the sign again. Two negations cancelled and refunds
+ended up *added* to expenses instead of subtracted.
+
+Fix: SQL now returns plain `SUM(amount)`. JSX retains the type flip,
+which is the single, type-aware source of truth for sign — CREDIT refunds
+(and any other CREDIT in the same category, which by design only happens
+when something slipped past the non-refund allowlist) subtract correctly.
+
+Lesson: when the same correction is encoded at two layers (SQL math AND
+JSX reducer), they must be designed together — or one of them silently
+double-applies. Pick one layer to own the sign; the other is a passthrough.
+
+### Lesson learned (recorded for RCA #9)
+Self-transfers and term-deposit credits were appearing on the Expenses tab as
+`Shopping / Refund` (e.g. ₹3,87,521 "TD TO F", and multiple ₹50k–₹1L
+`MOB/SELFFT/<NAME>/...` rows). Root cause: the categorizer ran refund
+detection (step 0) BEFORE the self-transfer / FD / investments / CC-bill
+filters. Refund detection treats every CREDIT as a refund unless its merchant
+or raw transaction info matches `NON_REFUND_CREDITS`. SELFFT and TD/FD
+keywords were NOT in that allowlist, so the refund branch caught those
+CREDITs first, tagged them `Shopping / Refund`, and returned — the
+non-expense filters never ran. Because the ingest filter in `lib/scan.js`
+only drops `Self Transfer` / `Investments` / `Credit Card Bill`, these rows
+sailed into the DB as expenses and double-counted as negative spend in the
+trends math.
+
+Fix: re-ordered the categorizer pipeline so non-expense filters
+(self-transfer, FD/TD, investments, CC bill, staff salary) run BEFORE
+refund detection. Refund is now the fallback for *unmatched* CREDITs only.
+
+**Ordering invariant going forward**: any new non-expense category MUST be
+added BEFORE the refund check in `categorize()`. Equivalently: never add a
+filter that runs only on the strength of `txn.type === 'CREDIT'` matching
+above explicit category filters. If you find yourself extending
+`NON_REFUND_CREDITS` to "fix" a mis-tag, ask whether the category really
+belongs above the refund step instead.
 
 ### Lesson learned (recorded for RCA #8)
 First ICICI parser pass classified every PDF row as DEBIT, including obvious
@@ -291,7 +345,7 @@ For databases created before `is_refund` existed, the column is added via
 | ICICI parser uses balance-diff to determine CREDIT vs DEBIT | ICICI's text extraction collapses Withdrawal and Deposit columns; the running balance is the only reliable signal left |
 | Refund detection by CREDIT type (not keyword match) | Keyword matching missed cashbacks and generic credits; the non-refund allowlist (salary/investments/transfers) is shorter and more stable than a refund denylist would be |
 | Refunds routed to `Shopping` with `sub_category = 'Refund'` | Most refunds in this dataset are e-commerce returns; one bucket is simpler than splitting refunds across original-spend categories, and the green `+` makes them visually obvious in Expenses |
-| Subtract refunds in `getMonthlyCategoryTotals()` via CASE expression | Keeps the math in SQL, so every consumer of the trends API sees the same net number |
+| Subtract refunds via JSX type-flip, not SQL CASE | Single layer of sign-flipping is correct; the original `SUM(CASE WHEN is_refund=1 THEN -amount ELSE amount END)` plus the JSX `type==='CREDIT' ? -total : total` double-negated refunds and *inflated* net spend. See RCA #10. |
 | Hardcoded source label `HDFC Credit Card` / `ICICI Bank` for uploaded rows | Will be replaced with header-text detection if a fourth/fifth issuer lands |
 | Drop `Credit Card Bill` rows at ingest (alongside `Self Transfer` and `Investments`) | Paying a CC bill — whether the savings-side debit to CRED Club or the BPPY/payment-received credit on the card statement — is settling debt, not new spend. The underlying purchases were already counted on the card statement, so writing the bill payment too would double-count. Filter is applied in both `lib/scan.js` and `app/api/upload-pdf/route.js`. The categorizer still tags these rows as `Credit Card Bill`; they just never reach the DB. To see them, relax the filter in those two write paths. |
 
