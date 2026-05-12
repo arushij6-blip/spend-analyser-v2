@@ -23,19 +23,22 @@ export default function DashboardTab({ transactions }) {
     [transactions, month]
   );
 
-  const debits = monthTxns;
-  const totalDebit = debits.reduce((s, t) => s + t.amount, 0);
-  const avgTicket = debits.length ? totalDebit / debits.length : 0;
+  const debits = monthTxns.filter((t) => t.type === 'DEBIT');
+  const signedSum = (rows) =>
+    rows.reduce((s, t) => s + (t.type === 'DEBIT' ? t.amount : -t.amount), 0);
+  const totalDebit = signedSum(monthTxns);
+  const avgTicket = debits.length ? debits.reduce((s, t) => s + t.amount, 0) / debits.length : 0;
 
   const byCategory = useMemo(() => {
     const m = new Map();
-    for (const t of debits) {
-      m.set(t.category, (m.get(t.category) ?? 0) + t.amount);
+    for (const t of monthTxns) {
+      const delta = t.type === 'DEBIT' ? t.amount : -t.amount;
+      m.set(t.category, (m.get(t.category) ?? 0) + delta);
     }
     return Array.from(m.entries())
       .map(([name, amount]) => ({ name, amount, share: totalDebit > 0 ? amount / totalDebit : 0 }))
       .sort((a, b) => b.amount - a.amount);
-  }, [debits, totalDebit]);
+  }, [monthTxns, totalDebit]);
 
   const topTxns = useMemo(
     () => [...debits].sort((a, b) => b.amount - a.amount).slice(0, 5),
@@ -45,9 +48,7 @@ export default function DashboardTab({ transactions }) {
   const compareLabel = prevMonth ? formatMonthShort(prevMonth) : null;
   const prevDebit = useMemo(() => {
     if (!prevMonth) return null;
-    return transactions
-      .filter((t) => t.date?.startsWith(prevMonth))
-      .reduce((s, t) => s + t.amount, 0);
+    return signedSum(transactions.filter((t) => t.date?.startsWith(prevMonth)));
   }, [transactions, prevMonth]);
 
   const delta = prevDebit != null && prevDebit > 0 ? (totalDebit - prevDebit) / prevDebit : null;
