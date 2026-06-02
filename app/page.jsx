@@ -98,6 +98,25 @@ export default function Home() {
     }
   }
 
+  async function hideTransaction(messageId) {
+    // optimistic: drop from local list so Expenses + Hero update instantly
+    setTransactions((prev) => prev.filter((t) => t.message_id !== messageId));
+    try {
+      const res = await fetch('/api/transactions', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messageId, hidden: true }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Hide failed');
+      }
+    } catch (err) {
+      alert('Failed to hide: ' + err.message);
+      await loadTransactions();
+    }
+  }
+
   async function updateCategory(messageId, category, opts = {}) {
     const res = await fetch('/api/transactions', {
       method: 'PATCH',
@@ -123,10 +142,31 @@ export default function Home() {
     [transactions]
   );
 
+  // Hero scopes to the latest month that actually has transactions, not the
+  // current calendar month — so if no June data has synced yet, May still
+  // shows. Falls back to current month when the DB is empty.
+  const currentMonth = useMemo(() => {
+    let latest = null;
+    for (const t of transactions) {
+      const m = t.date?.slice(0, 7);
+      if (m && (latest === null || m > latest)) latest = m;
+    }
+    if (latest) return latest;
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }, [transactions]);
+
+  const currentMonthLabel = useMemo(() => {
+    const [y, m] = currentMonth.split('-');
+    const names = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    return `${names[Number(m) - 1]} ${y}`;
+  }, [currentMonth]);
+
   const stats = useMemo(() => {
-    // Hero summary is May-only. Net of refunds: DEBIT − CREDIT, matching
-    // the Expenses tab's per-month signed-sum so the two never drift.
-    const monthTxns = transactions.filter((t) => t.date?.startsWith('2026-05'));
+    // Hero summary scopes to the current calendar month. Net of refunds:
+    // DEBIT − CREDIT, matching the Expenses tab's per-month signed-sum so
+    // the two never drift.
+    const monthTxns = transactions.filter((t) => t.date?.startsWith(currentMonth));
     const debits = monthTxns.filter((t) => t.type === 'DEBIT');
     const totalDebit = monthTxns.reduce(
       (s, t) => s + (t.type === 'DEBIT' ? t.amount : -t.amount),
@@ -150,7 +190,7 @@ export default function Home() {
       avg: debits.length ? totalDebit / debits.length : 0,
       topCategory: top ? { name: top[0], amount: top[1] } : null,
     };
-  }, [transactions, debitTransactions]);
+  }, [transactions, debitTransactions, currentMonth]);
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: 'var(--bg)' }}>
@@ -170,7 +210,7 @@ export default function Home() {
 
       <main className="flex-1">
         <div className="max-w-[1180px] mx-auto px-8">
-          <Hero stats={stats} loading={loading} />
+          <Hero stats={stats} loading={loading} monthLabel={currentMonthLabel} />
           <TabNav active={active} setActive={setActive} uncategorized={stats.uncategorized} />
 
           <div className="pb-24">
@@ -185,6 +225,7 @@ export default function Home() {
                   <ExpensesTab
                     transactions={transactions}
                     onUpdateCategory={updateCategory}
+                    onHide={hideTransaction}
                     categories={CATEGORIES}
                   />
                 )}
@@ -297,7 +338,7 @@ function Mark() {
   );
 }
 
-function Hero({ stats, loading }) {
+function Hero({ stats, loading, monthLabel }) {
   const { totalDebit, txnCount, topCategory, avg } = stats;
 
   return (
@@ -306,7 +347,7 @@ function Hero({ stats, loading }) {
 
       <div className="md:pr-[200px]">
         <div className="text-[11px] uppercase tracking-[0.14em] font-medium" style={{ color: 'var(--ink-500)' }}>
-          Spending overview · May 2026
+          Spending overview · {monthLabel}
         </div>
 
         <div className="mt-3 flex items-end gap-6 flex-wrap">
@@ -500,6 +541,11 @@ function Toast({ visible, state, kind = 'sync' }) {
           {isErr ? state.error : (
             <>
               {verb} · <span className="text-neutral-500 num">+{state.lastResult?.inserted} new, {state.lastResult?.updated} updated</span>
+              {state.lastResult?.failedAccounts?.length > 0 && (
+                <span className="text-amber-600 ml-1">
+                  · {state.lastResult.failedAccounts.map(a => a.email.split('@')[0]).join(', ')} failed (re-auth needed)
+                </span>
+              )}
             </>
           )}
         </span>

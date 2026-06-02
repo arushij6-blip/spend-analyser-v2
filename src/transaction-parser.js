@@ -198,6 +198,12 @@ export function parseTransactionInfo(info) {
       merchant = destName || destAccount || null;
     }
     transactionId = destAccount || null;
+  } else if (top === 'PUR' || top === 'ECOM') {
+    // PUR/<merchant>/<ref1>/<ref2> — Axis card purchase (POS or e-commerce).
+    // Example: PUR/NUMASTAYS GB/000000000734582/614386824726
+    category = top;
+    merchant = segments[1] ?? null;
+    transactionId = segments[3] ?? segments[2] ?? null;
   } else if (['NEFT', 'IMPS', 'RTGS', 'ATM', 'POS'].includes(top)) {
     category = top;
     merchant = segments[1] ?? null;
@@ -239,6 +245,22 @@ export function parseAxisTransactionEmail({ html, plaintext, subject, date }) {
     } else if (ftCredit) {
       type = 'CREDIT';
       amount = parseAmount(ftCredit[1]);
+    } else {
+      // POS / card-purchase format: "INR 69910.85 has been debited from your A/c..."
+      // (also handles credited-to variants, e.g. refunds posted as credits)
+      const posDebit = text.match(
+        /(INR\s*[\d,]+(?:\.\d+)?)\s+has\s+been\s+debited\s+from\s+your\s+A\/c/i
+      );
+      const posCredit = text.match(
+        /(INR\s*[\d,]+(?:\.\d+)?)\s+has\s+been\s+credited\s+to\s+your\s+A\/c/i
+      );
+      if (posDebit) {
+        type = 'DEBIT';
+        amount = parseAmount(posDebit[1]);
+      } else if (posCredit) {
+        type = 'CREDIT';
+        amount = parseAmount(posCredit[1]);
+      }
     }
   }
 
@@ -255,8 +277,10 @@ export function parseAxisTransactionEmail({ html, plaintext, subject, date }) {
   let dateTimeStr =
     extractLabel(text, 'Date & Time') ?? extractLabel(text, 'Date and Time');
   if (!dateTimeStr) {
+    // Accept either "on DD-MM-YYYY at HH:MM:SS" (UPI alerts) or
+    // "on DD-MM-YYYY HH:MM:SS" (POS / card-purchase alerts — no "at").
     const dtMatch = text.match(
-      /on\s+(\d{2}-\d{2}-\d{4})\s+at\s+(\d{2}:\d{2}:\d{2})/i
+      /on\s+(\d{2}-\d{2}-\d{4})\s+(?:at\s+)?(\d{2}:\d{2}:\d{2})/i
     );
     if (dtMatch) dateTimeStr = `${dtMatch[1]} ${dtMatch[2]}`;
   }
@@ -272,6 +296,15 @@ export function parseAxisTransactionEmail({ html, plaintext, subject, date }) {
   if (!infoStr) {
     const byMatch = text.match(/by\s+([A-Z][A-Z0-9/_\-.\s]+)/);
     if (byMatch) infoStr = byMatch[1].trim();
+  }
+  // POS / card-purchase alerts use "at PUR/<merchant>/<refs>" (no "by").
+  // Also seen: "at ATM/...", "at POS/...", "at ECOM/...". Match the channel
+  // prefix explicitly so we don't accidentally swallow trailing English prose.
+  if (!infoStr) {
+    const atMatch = text.match(
+      /\bat\s+((?:PUR|POS|ATM|ECOM|NEFT|IMPS|RTGS)\/[A-Z0-9/_\-.\s]+?)(?=\.\s|\.\s*Available|\s*Available\s+balance|\s*\.|$)/i
+    );
+    if (atMatch) infoStr = atMatch[1].trim().replace(/\s+/g, ' ');
   }
   const info = parseTransactionInfo(infoStr);
 

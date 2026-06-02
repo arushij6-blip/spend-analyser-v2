@@ -54,6 +54,7 @@ const ORDERING_IN_KEYWORDS = [
 // "TERM DEPOSIT", "FIXED DEPOSIT" — Axis credits/debits between savings and
 // a customer's own deposit.
 const FD_TRANSFER_KEYWORDS = [
+  'MBB-TD',
   'TD TO',
   'TD FROM',
   'FD TO',
