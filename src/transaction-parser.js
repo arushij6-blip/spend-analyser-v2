@@ -145,7 +145,7 @@ function parseDateFromEmailHeader(emailDate) {
  * a self-transfer and not an expense (e.g., moving money to one's own
  * fixed/term deposit). Configured in config.local.js.
  */
-import { SELF_OWNED_ACCOUNTS } from '../config.local.js';
+import { SELF_OWNED_ACCOUNTS } from '../lib/user-config.js';
 export function parseTransactionInfo(info) {
   if (!info) return { category: null, merchant: null, rawInfo: null };
   const raw = info.trim();

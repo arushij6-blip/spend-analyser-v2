@@ -15,10 +15,10 @@ export async function GET(req) {
     const month = searchParams.get('month');
     if (category && month) {
       const limit = Math.min(50, Number(searchParams.get('limit') ?? 5));
-      const rows = getTopTransactionsForCategoryMonth(category, month, limit);
+      const rows = await getTopTransactionsForCategoryMonth(category, month, limit);
       return NextResponse.json({ transactions: rows });
     }
-    const rows = getAllTransactions();
+    const rows = await getAllTransactions();
     return NextResponse.json({ transactions: rows });
   } catch (err) {
     return NextResponse.json({ error: err.message }, { status: 500 });
@@ -44,7 +44,7 @@ export async function PATCH(req) {
       );
     }
     if (typeof hidden === 'boolean') {
-      const { changes } = setTransactionHidden(messageId, hidden);
+      const { changes } = await setTransactionHidden(messageId, hidden);
       if (changes === 0) {
         return NextResponse.json(
           { error: `No transaction found with messageId=${messageId}` },
@@ -59,7 +59,7 @@ export async function PATCH(req) {
         { status: 400 }
       );
     }
-    const { changes, alsoUpdatedIds } = updateCategory(messageId, category, { learn });
+    const { changes, alsoUpdatedIds } = await updateCategory(messageId, category, { learn });
     if (changes === 0) {
       return NextResponse.json(
         { error: `No transaction found with messageId=${messageId}` },

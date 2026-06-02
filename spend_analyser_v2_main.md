@@ -1,7 +1,7 @@
 # Spend Analyser v2 — Project Knowledge File
 
 ## Purpose
-A personal spend analyser that ingests transactions from multiple sources, categorizes them through a shared rules pipeline, persists them in SQLite, and visualizes spending in a Next.js dashboard.
+A personal spend analyser that ingests transactions from multiple sources, categorizes them through a shared rules pipeline, persists them in Postgres (Neon, via Vercel; SQLite remains available for one-off local backfills), and visualizes spending in a Next.js dashboard.
 
 Currently supported ingest sources:
 1. **Gmail** — Axis Bank transaction-alert emails, fetched via the Gmail API
@@ -52,8 +52,13 @@ spend-analyser-v2/ (dir still named axis-email-reader)
 │       ├── trends/                    # GET monthly category totals
 │       └── budgets/                   # GET list (budgets + live spend) / PUT upsert
 │           └── check-alerts/          # POST → evaluate 80%/100% thresholds, send Telegram
+├── db/
+│   └── schema.sql                     # Postgres schema; paste into Neon SQL editor once
+├── scripts/
+│   └── backfill-to-postgres.js        # One-shot SQLite → Postgres copy for the initial migration
 ├── lib/
-│   ├── db.js                          # SQLite layer (better-sqlite3, single source of truth)
+│   ├── db.js                          # Postgres layer (pg pool, async, single source of truth)
+│   ├── user-config.js                 # Loads EMAIL_SOURCE_MAP etc. from config.local.js OR env
 │   ├── scan.js                        # runScan() — used by /api/scan and future CLI
 │   ├── telegram.js                    # Minimal Telegram Bot API sender (env-driven)
 │   ├── alert-tones.js                 # Reusable playful copy pools per threshold
@@ -513,6 +518,49 @@ For databases created before `is_refund` existed, the column is added via
 - API: `PATCH /api/transactions` with `{ messageId, hidden: true|false }`
   toggles the flag. The UI offers a hover-only `×` button on each row in
   the Expenses table with a confirm prompt.
+
+## Hosting (Vercel + Neon Postgres)
+
+- App: Vercel project `spend-analyser-v2` → `spend-analyser-v2.vercel.app`.
+- DB: Neon free-tier Postgres provisioned through the Vercel Storage tab.
+  Connection strings are auto-injected as `DATABASE_URL` (pooled) and
+  `DATABASE_URL_UNPOOLED` (direct). `lib/db.js` reads `DATABASE_URL` and falls
+  back to `POSTGRES_URL`/`POSTGRES_PRISMA_URL` for cross-naming compatibility.
+- Schema: run `db/schema.sql` once in the Neon SQL editor on first deploy.
+  All `CREATE` statements are idempotent.
+- Backfill: `scripts/backfill-to-postgres.js` reads `data/app.db` and inserts
+  into Postgres via `DATABASE_URL_UNPOOLED` (the direct connection — the
+  pooler can interrupt long-running transactions). Idempotent via
+  `ON CONFLICT DO NOTHING`. Run locally:
+  `DATABASE_URL_UNPOOLED=... npm run backfill`.
+
+### Gmail auth on Vercel
+The interactive OAuth flow in `src/auth.js` is local-only — it binds
+`http://localhost:8080/callback` and writes to `~/.gmail-mcp/tokens.json`,
+neither of which work on serverless. On Vercel, `getAllAuthClients()` switches
+to `getAllAuthClientsFromEnv()` when it sees `GMAIL_CLIENT_ID` +
+`GMAIL_ACCOUNT_EMAILS` in `process.env`. Per-account refresh tokens are read
+from `GMAIL_REFRESH_TOKEN_<EMAIL_SLUG>` (email upper-cased, non-alnum → `_`).
+
+You still mint the refresh token by running `node src/auth.js you@gmail.com`
+locally, then copy it from `~/.gmail-mcp/tokens.json` into a Vercel env var.
+No redirect URI change is needed in Google Cloud Console.
+
+### User config on Vercel
+`config.local.js` is gitignored, so it doesn't exist on Vercel. The shim
+`lib/user-config.js` dynamically imports `config.local.js` when present, and
+otherwise reads the same values from env vars (`EMAIL_SOURCE_MAP_JSON`,
+`DEFAULT_SOURCE`, `SELF_OWNED_ACCOUNTS_JSON`, `STAFF_SALARY_PATTERNS_JSON`).
+All four ingest files (`lib/scan.js`, `src/fetch-all.js`,
+`src/transaction-parser.js`, `src/categorizer.js`) import via the shim, never
+from `config.local.js` directly.
+
+### Latent bug fixed during the migration
+`src/fetch-all.js` used to call `main()` unconditionally at module load. The
+Next.js build imports `lib/scan.js → src/fetch-all.js` to discover route
+exports, which would trigger a real Gmail scan on every build. The CLI now
+guards with `import.meta.url === \`file://${process.argv[1]}\`` so `main()`
+only fires when the file is executed directly.
 
 ## Future Improvements
 - Add CSV/JSON export for all transactions

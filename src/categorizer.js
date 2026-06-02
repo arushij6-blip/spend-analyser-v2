@@ -24,7 +24,7 @@
  *   Staff Salaries, Medical, Going Out, Ordering In, Credit Card Bill, Misc
  */
 
-import { STAFF_SALARY_PATTERNS } from '../config.local.js';
+import { STAFF_SALARY_PATTERNS } from '../lib/user-config.js';
 
 // -------- Commute rule --------
 const COMMUTE_AMOUNT_THRESHOLD = 150;
