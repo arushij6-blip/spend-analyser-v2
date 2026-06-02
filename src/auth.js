@@ -118,8 +118,20 @@ export async function getAuthClient(email) {
 
 /**
  * Returns an array of { email, auth } objects for all authenticated accounts.
+ *
+ * On Vercel / any host without `~/.gmail-mcp/tokens.json` and `~/.claude/.env.gmail`,
+ * reads OAuth credentials and refresh tokens from process.env instead:
+ *   GMAIL_CLIENT_ID
+ *   GMAIL_CLIENT_SECRET
+ *   GMAIL_ACCOUNT_EMAILS                 comma-separated list of emails
+ *   GMAIL_REFRESH_TOKEN_<EMAIL_SLUG>     one per email; <EMAIL_SLUG> is the
+ *                                        email upper-cased with non-alnum→`_`
+ *                                        e.g. you@gmail.com → YOU_GMAIL_COM
  */
 export async function getAllAuthClients() {
+  if (process.env.GMAIL_CLIENT_ID && process.env.GMAIL_ACCOUNT_EMAILS) {
+    return getAllAuthClientsFromEnv();
+  }
   const { clientId, clientSecret } = await loadCredentials();
   const allTokens = await loadAllTokens();
 
@@ -131,6 +143,54 @@ export async function getAllAuthClients() {
       REDIRECT_URI
     );
     oauth2Client.setCredentials(tokens);
+    result.push({ email, auth: oauth2Client });
+  }
+  return result;
+}
+
+function emailToEnvSlug(email) {
+  return email.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+}
+
+/**
+ * Build auth clients exclusively from process.env. No filesystem access.
+ * Designed for serverless deploys (Vercel, etc.) where the OAuth dance was
+ * run locally and the refresh token was copied into env vars.
+ */
+function getAllAuthClientsFromEnv() {
+  const clientId = process.env.GMAIL_CLIENT_ID;
+  const clientSecret = process.env.GMAIL_CLIENT_SECRET;
+  if (!clientId || !clientSecret) {
+    throw new Error(
+      'GMAIL_CLIENT_ID / GMAIL_CLIENT_SECRET not set. Set them in your Vercel env vars.'
+    );
+  }
+  const emails = (process.env.GMAIL_ACCOUNT_EMAILS ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (emails.length === 0) {
+    throw new Error(
+      'GMAIL_ACCOUNT_EMAILS not set. Provide a comma-separated list of authenticated Gmail addresses.'
+    );
+  }
+
+  const result = [];
+  for (const email of emails) {
+    const slug = emailToEnvSlug(email);
+    const refreshToken = process.env[`GMAIL_REFRESH_TOKEN_${slug}`];
+    if (!refreshToken) {
+      console.warn(
+        `[auth] missing GMAIL_REFRESH_TOKEN_${slug} — skipping ${email}`
+      );
+      continue;
+    }
+    const oauth2Client = new google.auth.OAuth2(
+      clientId,
+      clientSecret,
+      REDIRECT_URI
+    );
+    oauth2Client.setCredentials({ refresh_token: refreshToken });
     result.push({ email, auth: oauth2Client });
   }
   return result;

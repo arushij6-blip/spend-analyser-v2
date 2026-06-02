@@ -35,9 +35,9 @@ export async function GET(req) {
     const { searchParams } = new URL(req.url);
     const month = searchParams.get('month') ?? defaultMonth();
 
-    const budgets = getBudgetsForMonth(month);
-    const spendMap = getCategorySpendForMonth(month);
-    const suggestionsMap = getCategorySpendForMonth(prevMonth(month));
+    const budgets = await getBudgetsForMonth(month);
+    const spendMap = await getCategorySpendForMonth(month);
+    const suggestionsMap = await getCategorySpendForMonth(prevMonth(month));
 
     const budgetMap = new Map(budgets.map((b) => [b.category, b.amount]));
     const categories = new Set([...budgetMap.keys(), ...spendMap.keys()]);
@@ -94,10 +94,10 @@ export async function PUT(req) {
     }
     const n = Number(amount);
     if (amount == null || !Number.isFinite(n) || n <= 0) {
-      deleteBudget(category, month);
+      await deleteBudget(category, month);
       return NextResponse.json({ ok: true, deleted: true });
     }
-    upsertBudget(category, month, n);
+    await upsertBudget(category, month, n);
     return NextResponse.json({ ok: true, category, month, amount: n });
   } catch (err) {
     return NextResponse.json({ error: err.message }, { status: 500 });

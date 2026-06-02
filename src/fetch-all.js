@@ -26,7 +26,7 @@ import {
 } from './gmail-client.js';
 import { parseAxisTransactionEmail } from './transaction-parser.js';
 import { categorize } from './categorizer.js';
-import { EMAIL_SOURCE_MAP, DEFAULT_SOURCE } from '../config.local.js';
+import { EMAIL_SOURCE_MAP, DEFAULT_SOURCE } from '../lib/user-config.js';
 
 const DEFAULT_START_DATE = '2025-05-01';
 const CONCURRENCY = 8; // gmail API quota is generous; 8 is safe
@@ -352,8 +352,14 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error('\n✗ Failed:', err.message);
-  if (process.env.DEBUG) console.error(err.stack);
-  process.exit(1);
-});
+// Only run the CLI flow when this file is invoked directly. Guards against
+// the `main()` body firing on every API-route import (which was triggering a
+// real Gmail scan during `next build`).
+const isMain = import.meta.url === `file://${process.argv[1]}`;
+if (isMain) {
+  main().catch((err) => {
+    console.error('\n✗ Failed:', err.message);
+    if (process.env.DEBUG) console.error(err.stack);
+    process.exit(1);
+  });
+}

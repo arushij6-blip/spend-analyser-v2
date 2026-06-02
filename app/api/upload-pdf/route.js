@@ -65,7 +65,7 @@ export async function POST(req) {
       });
     }
 
-    const learnedRules = getLearnedRules();
+    const learnedRules = await getLearnedRules();
     const rows = [];
     for (const txn of parsed.transactions) {
       const recat = categorize(txn, learnedRules);
@@ -100,7 +100,7 @@ export async function POST(req) {
       });
     }
 
-    const { inserted, updated } = upsertTransactions(rows);
+    const { inserted, updated } = await upsertTransactions(rows);
 
     // Best-effort budget alert check after fresh rows land. Non-blocking.
     checkAndSendBudgetAlertsAsync();
