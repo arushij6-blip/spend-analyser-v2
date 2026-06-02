@@ -42,9 +42,8 @@ function buildQuery(startDate /* YYYY-MM-DD */) {
   //   - alerts@axisbank.com   (legacy, used through Dec 2025)
   //   - alerts@axis.bank.in   (new domain, Jan 2026 onwards)
   // We include both so the cutover doesn't drop any transactions.
-  // Also limit to May 31, 2026 to only scan April & May.
   const gmailDate = startDate.replace(/-/g, '/');
-  return `(from:alerts@axisbank.com OR from:alerts@axis.bank.in) after:${gmailDate} before:2026/06/01 (debited OR credited)`;
+  return `(from:alerts@axisbank.com OR from:alerts@axis.bank.in) after:${gmailDate} (debited OR credited)`;
 }
 
 /**
@@ -190,8 +189,13 @@ export async function scanTransactions(startDate, email) {
 
   for (const { email: acctEmail, auth } of authClients) {
     console.log(`\n▶ Scanning ${acctEmail}…`);
-    const result = await scanSingleAccount(acctEmail, auth, startDate);
-    results.push(result);
+    try {
+      const result = await scanSingleAccount(acctEmail, auth, startDate);
+      results.push(result);
+    } catch (err) {
+      console.error(`✗ ${acctEmail}: ${err.message}`);
+      results.push({ email: acctEmail, error: err.message, categorized: [] });
+    }
   }
 
   return results;

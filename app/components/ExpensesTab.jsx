@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { fmtAmount, fmtDate } from './categories.js';
 
-export default function ExpensesTab({ transactions, onUpdateCategory, categories }) {
+export default function ExpensesTab({ transactions, onUpdateCategory, onHide, categories }) {
   const [sort, setSort] = useState({ key: 'date', dir: 'desc' });
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState(null);
@@ -171,6 +171,7 @@ export default function ExpensesTab({ transactions, onUpdateCategory, categories
                       <th className="px-6 py-3 cursor-pointer hover:opacity-80 transition text-right" onClick={() => toggleSort('amount')}>
                         Amount {sortIndicator('amount')}
                       </th>
+                      <th className="px-3 py-3" aria-label="Actions" />
                     </tr>
                   </thead>
                   <tbody>
@@ -230,6 +231,25 @@ export default function ExpensesTab({ transactions, onUpdateCategory, categories
                           >
                             {t.type === 'CREDIT' ? '+' : ''}{fmtAmount(t.amount)}
                           </span>
+                        </td>
+                        <td className="px-3 py-3.5 align-top text-right">
+                          {onHide && (
+                            <button
+                              onClick={() => {
+                                if (confirm(`Hide this transaction from expenses?\n\n${prettifyMerchant(t.merchant) ?? ''} · ${fmtAmount(t.amount)}`)) {
+                                  onHide(t.message_id);
+                                }
+                              }}
+                              title="Hide from expenses"
+                              aria-label="Hide transaction"
+                              className="opacity-0 group-hover:opacity-100 transition h-7 w-7 rounded-md flex items-center justify-center text-neutral-400 hover:text-neutral-900 hover:bg-neutral-100"
+                            >
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                <line x1="6" y1="6" x2="18" y2="18" />
+                                <line x1="6" y1="18" x2="18" y2="6" />
+                              </svg>
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}

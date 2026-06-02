@@ -3,6 +3,7 @@ import {
   getAllTransactions,
   getTopTransactionsForCategoryMonth,
   updateCategory,
+  setTransactionHidden,
 } from '../../../lib/db.js';
 
 export const dynamic = 'force-dynamic';
@@ -35,10 +36,26 @@ export async function GET(req) {
 export async function PATCH(req) {
   try {
     const body = await req.json();
-    const { messageId, category, learn = false } = body;
-    if (!messageId || !category) {
+    const { messageId, category, learn = false, hidden } = body;
+    if (!messageId) {
       return NextResponse.json(
-        { error: 'messageId and category are required' },
+        { error: 'messageId is required' },
+        { status: 400 }
+      );
+    }
+    if (typeof hidden === 'boolean') {
+      const { changes } = setTransactionHidden(messageId, hidden);
+      if (changes === 0) {
+        return NextResponse.json(
+          { error: `No transaction found with messageId=${messageId}` },
+          { status: 404 }
+        );
+      }
+      return NextResponse.json({ ok: true, hidden });
+    }
+    if (!category) {
+      return NextResponse.json(
+        { error: 'category is required' },
         { status: 400 }
       );
     }
