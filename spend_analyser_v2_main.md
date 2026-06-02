@@ -160,7 +160,7 @@ column flag, and the same `1234.56 5678.90` pattern appears for both
 withdrawals and deposits.
 
 Account number is pulled from the statement header
-(`Saving Account no. 008701530654`).
+(`Saving Account no. <digits>`).
 
 ## Refund Detection (CREDIT-based)
 
@@ -271,7 +271,7 @@ double-applies. Pick one layer to own the sign; the other is a passthrough.
 ### Lesson learned (recorded for RCA #9)
 Self-transfers and term-deposit credits were appearing on the Expenses tab as
 `Shopping / Refund` (e.g. ₹3,87,521 "TD TO F", and multiple ₹50k–₹1L
-`MOB/SELFFT/ANKUSH TAKYAR/...` rows). Root cause: the categorizer ran refund
+`MOB/SELFFT/<NAME>/...` rows). Root cause: the categorizer ran refund
 detection (step 0) BEFORE the self-transfer / FD / investments / CC-bill
 filters. Refund detection treats every CREDIT as a refund unless its merchant
 or raw transaction info matches `NON_REFUND_CREDITS`. SELFFT and TD/FD
