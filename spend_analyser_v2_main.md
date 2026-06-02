@@ -231,8 +231,11 @@ statement and confirming the row count plus a sample of net category
 totals against the bank's own summary.
 
 ## Date Range Target
-- Start: configurable via CLI arg (default 2025-05-01)
-- End: current date
+- Start: configurable via CLI arg (default 2025-05-01); web UI scan currently
+  pins start to `2026-04-01`
+- End: current date — no upper bound. (Earlier versions clamped the Gmail
+  query and DB reads to `2026-05-31` while only April & May were in scope;
+  that ceiling was removed so June+ transactions appear automatically.)
 - Senders to include for transaction alerts:
   - `alerts@axisbank.com`  — legacy domain, used through Dec 22, 2025
   - `alerts@axis.bank.in`  — new domain, Jan 2026 onwards (Axis migrated alert infra)
@@ -300,6 +303,35 @@ and after PDF extraction both look identical. Fix: track balance changes
 between consecutive rows and infer type from the sign of the diff. When the
 underlying text strips structural cues, derive the missing signal from
 something else in the document (here, the running balance).
+
+### Lesson learned (recorded for RCA #11)
+May Hero was showing ₹-2,48,452 as total spend. Root cause: a ₹4,00,395
+CREDIT with raw info `MBB-TD/926040076951777/06-.T` — a term-deposit
+maturity via Axis Mobile Banking — was not caught by
+`FD_TRANSFER_KEYWORDS` because the list had `TD TO`, `TD FROM`, etc. but
+not `MBB-TD`. The refund detection step (which treats any unmatched CREDIT
+as a refund) tagged it `Shopping / Refund`, it entered the DB, and the
+Hero's `DEBIT − CREDIT` math went negative.
+
+Fix: added `MBB-TD` to `FD_TRANSFER_KEYWORDS` so step 2 catches it as
+`Self Transfer / Term deposit` and `lib/scan.js` filters it out at ingest.
+
+Lesson: Axis Bank uses multiple prefixes for term-deposit movements
+(`TD TO`, `TD FROM`, `MBB-TD`). When adding TD/FD patterns, check the
+actual raw transaction strings in the DB — bank formats are not uniform
+across channels (net banking vs mobile banking vs NEFT). The non-refund
+allowlist in `NON_REFUND_CREDITS` is a second line of defense, but the
+primary filter must be in `FD_TRANSFER_KEYWORDS` so the row is classified
+as `Self Transfer` and never reaches the DB.
+
+### Lesson learned (recorded for RCA #12)
+When one Gmail account's OAuth token expired (`invalid_grant`), the entire
+sync failed with "Failed to fetch" — no partial results, no indication of
+which account was broken. Root cause: `scanTransactions` looped through
+all accounts without try-catch, so one account's auth failure threw and
+killed the entire scan. Fix: wrapped per-account scanning in try-catch;
+failed accounts are collected in `failedAccounts[]` and surfaced in the
+API response / toast. Working accounts scan normally.
 
 ## Budgets & Telegram Alerts
 
@@ -447,9 +479,9 @@ For databases created before `is_refund` existed, the column is added via
 | Drop `Credit Card Bill` rows at ingest (alongside `Self Transfer` and `Investments`) | Paying a CC bill — whether the savings-side debit to CRED Club or the BPPY/payment-received credit on the card statement — is settling debt, not new spend. The underlying purchases were already counted on the card statement, so writing the bill payment too would double-count. Filter is applied in both `lib/scan.js` and `app/api/upload-pdf/route.js`. The categorizer still tags these rows as `Credit Card Bill`; they just never reach the DB. To see them, relax the filter in those two write paths. |
 
 ## Known Issues / Open Items
-- Dashboard date windows in `lib/db.js` are hard-coded to `2026-04-01`–`2026-05-31`.
-  PDF statements covering earlier dates land in the DB but won't render in the
-  UI lists / trends until the window is widened.
+- Dashboard date floor in `lib/db.js` is hard-coded to `2026-04-01` (no
+  upper bound). PDF statements covering earlier dates land in the DB but
+  won't render in the UI lists / trends until the floor is lowered.
 - ICICI parser's balance-diff logic relies on rows being processed in
   statement order. If a PDF is multi-page and rows aren't perfectly sequential
   (e.g. continuation rows split across pages), the first row of each page
@@ -468,6 +500,19 @@ For databases created before `is_refund` existed, the column is added via
 - ICICI merchant strings retain bank-handle fragments (`/ICI...`, `/YES BANK
   L/...`, `@hd`, `@ybl`) after cleanup. Categorization still works, but the
   Expenses table shows visually noisy merchant cells for ICICI rows.
+
+## Hiding individual transactions
+- `transactions.hidden` (INTEGER 0/1) lets the user dismiss a row from the
+  Expenses tab (e.g. a misclassified self-transfer that slipped past the
+  ingest filter). When set to 1, the row is excluded from `getAllTransactions`,
+  `getTopTransactionsForCategoryMonth`, `getCategorySpendForMonth`,
+  `getMonthlyCategoryTotals`, and `getTransactionsForReview` — meaning it
+  disappears from Expenses, Dashboard, Hero, Trends, Budgets, and Review at
+  once. The underlying row stays in the DB so a future re-categorization
+  pass can still see it.
+- API: `PATCH /api/transactions` with `{ messageId, hidden: true|false }`
+  toggles the flag. The UI offers a hover-only `×` button on each row in
+  the Expenses table with a confirm prompt.
 
 ## Future Improvements
 - Add CSV/JSON export for all transactions
